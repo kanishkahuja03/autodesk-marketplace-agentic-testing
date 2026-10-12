@@ -171,3 +171,163 @@ class IntakeManifest(BaseModel):
     metadata_file: str | None = None
     estimated_tokens: int = Field(description="Rough size of all document text in LLM tokens (chars / 4)")
     warnings: list[str] = []
+
+
+# ================================================================ test plan (Agent 1 output, ARCHITECTURE.md §6.1)
+# These models are sent to OpenAI as strict structured output, so every field is required (no defaults)
+# and there are no free-form dicts: key/value data is a list of KeyValue.
+
+Scalar = str | int | float | bool | None
+
+
+class Category(str, Enum):
+    ENV = "ENV"
+    INST = "INST"
+    UNIN = "UNIN"
+
+
+class Origin(str, Enum):
+    AGENT = "agent"
+    BUILT_IN = "built-in"
+
+
+class Priority(str, Enum):
+    P1 = "P1"
+    P2 = "P2"
+    P3 = "P3"
+
+
+class Check(str, Enum):
+    """How the verdict engine compares an observed value with the expected one (ARCHITECTURE.md §5)."""
+
+    EQUALS = "equals"
+    NOT_EQUALS = "not_equals"
+    IN = "in"
+    EXISTS = "exists"
+    NOT_EXISTS = "not_exists"
+    CONTAINS = "contains"
+    MATCHES = "matches"
+
+
+class Citation(BaseModel):
+    """Where a claim comes from. The self-check verifies that `quote` really appears in `doc`."""
+
+    doc: str = Field(
+        description="Source ID from the evidence pack: 'D1'.. (documents), 'I1'.. (embedded in the installer) or 'F1' (installer facts)"
+    )
+    line: int | None = Field(description="Line number where the quote starts, if known")
+    quote: str = Field(description="Exact text copied from the source")
+
+
+class Expectation(BaseModel):
+    """One check on one observed key, e.g. install_exit_code in [0, 3010]."""
+
+    key: str = Field(description="snake_case observation key; must be listed in the test's `observe`")
+    check: Check
+    value: Scalar = Field(description="Expected value for equals/not_equals/contains/matches; null otherwise")
+    values: list[str] | None = Field(description="Allowed values for 'in'; null otherwise")
+
+
+class TestCase(BaseModel):
+    __test__ = False  # not a pytest test class
+
+    id: str = Field(description="Unique ID: <CATEGORY>-<3 digits>, e.g. INST-002")
+    origin: Origin = Field(description="'agent' for every test Agent 1 writes; 'built-in' is reserved for code")
+    category: Category
+    title: str
+    source: Citation | None = Field(description="Required for agent tests; null only for built-in tests")
+    preconditions: list[str] = Field(description="IDs of tests that must PASS first, e.g. ['ENV-000', 'INST-001']")
+    steps: list[str] = Field(description="Plain-language intents for Agent 2, e.g. 'Install the MSI silently with a log'")
+    observe: list[str] = Field(description="snake_case keys Agent 2 must report, e.g. ['install_exit_code']")
+    expected: list[Expectation]
+    priority: Priority
+
+
+class InstallerRef(BaseModel):
+    file: str
+    type: str = Field(description="'msi', 'exe' or 'zip-bundle'")
+    product_code: str | None
+    signer_claimed: str | None
+
+
+class AppInfo(BaseModel):
+    name: str
+    publisher: str | None
+    version: str | None
+    host_id: str = Field(description="A host-notes ID from the catalogue, 'none' (standalone app) or 'unknown'")
+    host_evidence: list[Citation] = Field(description="Why this host was chosen; empty only for 'unknown'")
+    host_versions: list[str] = Field(description="Supported host versions named in the sources, e.g. ['2027']")
+    installer: InstallerRef
+
+
+class Summary(BaseModel):
+    """Rendered into understanding.md."""
+
+    purpose: str
+    install_footprint: list[str]
+    commands_or_ui: list[str]
+    open_questions: list[str]
+
+
+class TestPlan(BaseModel):
+    """Agent 1's output and the content of testcases.yaml (ENV-000 is added by code afterwards)."""
+
+    __test__ = False  # not a pytest test class
+
+    app: AppInfo
+    summary: Summary
+    required_env: list[str] = Field(description="Every ${PLACEHOLDER} name used in steps or expected")
+    testcases: list[TestCase]
+
+
+# ================================================================ execution (ARCHITECTURE.md §6.2, §6.3)
+
+
+class KeyValue(BaseModel):
+    key: str
+    value: Scalar
+
+
+class Observation(BaseModel):
+    """One test's raw result, written by Agent 2's record_observation tool into observations.json. No status."""
+
+    test_id: str
+    executed: bool = Field(description="False if Agent 2 could not carry out the steps")
+    observed: list[KeyValue] = Field(description="One entry per key in the test's `observe` list")
+    evidence: list[str] = Field(description="Paths relative to the run folder, e.g. 'evidence/INST-001_install.log'")
+    notes: str | None
+
+
+class Agent2Result(BaseModel):
+    """Agent 2's final output; the observations themselves were already recorded per test."""
+
+    done: bool
+    env: list[KeyValue] = Field(description="Resolved value of every required_env placeholder")
+
+
+class Status(str, Enum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    BLOCKED = "BLOCKED"
+    ERROR = "ERROR"
+
+
+class CheckResult(BaseModel):
+    key: str
+    check: Check
+    expected: Scalar | list[str]
+    observed: Scalar
+    ok: bool
+
+
+class TestResult(BaseModel):
+    """Verdict for one test, decided by code (verdict engine), written to results.json."""
+
+    __test__ = False  # not a pytest test class
+
+    test_id: str
+    origin: Origin
+    status: Status
+    checks: list[CheckResult]
+    evidence: list[str]
+    notes: str | None

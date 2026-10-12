@@ -61,7 +61,7 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 | D28 | Cleanup (code, `finally`) | Always runs at the end. If the ProductCode is known **and** the Uninstall entry still exists **and** UNIN didn't complete → `msiexec /x {ProductCode} /qn`, logged as `CLEANUP`. It **never changes a verdict**. Non-MSI → logs "manual cleanup needed". |
 | D29 | Time limits | Agent 2: **150 turns**, **120 s per tool call**, **20 min total** (all in `.env`). If a limit is hit → the run is cancelled, missing tests become ERROR, cleanup runs, and it's logged. |
 | D30 | Observations | Agent 2 reports **per test, as it goes**, through the local tool **`record_observation(test_id, observed, evidence, notes)`**. It appends to `observations.json` and never touches the machine. The final agent output is only a short "done" plus the resolved env values. |
-| D31 | Screenshots | Our trace hook **saves every Windows-MCP screenshot** to `evidence/`. Agent 2 references those files in `record_observation`. *(Verify in the MCP smoke test.)* |
+| D31 | Screenshots | Our trace hook **saves every Windows-MCP screenshot** to `evidence/`. Agent 2 references those files in `record_observation`. *Verified on Windows-MCP 0.8.6: `Screenshot` returns the PNG inline as base64 (plus a text block with the cursor position and coordinate scale) and saves no file, so our code must save it (`execute/windows_mcp.py: save_images`).* |
 | D32 | PowerShell control | A code guardrail with an **allow-list of command starts**: `msiexec`, `Get-AuthenticodeSignature`, `Get-ItemProperty`, `Get-ChildItem`, `Test-Path`, `Get-CimInstance Win32_OperatingSystem`, and the admin check. Everything else is **rejected and logged**. |
 | D33 | Registry / FileSystem control | Code guardrail: Registry **read/list only**. FileSystem can read anywhere, but **write/copy/move only inside the run folder** and **never delete**. Rejections are logged and the agent is told why. |
 | D34 | Model | **One `OPENAI_MODEL`** for both agents (the strongest model available to the org). |
@@ -138,7 +138,7 @@ Keywords can't always identify the host from a description, so **Agent 1 decides
 |---|---|
 | Agent | `agents.Agent(name="test-designer", instructions=<skills>, output_type=TestPlan, model=$OPENAI_MODEL)` |
 | Tools | **None** |
-| Input message | All extracted document text (with doc IDs and line numbers), `installer_facts.json`. Each source is wrapped as untrusted evidence. |
+| Input message | An **evidence pack**, with each source wrapped as untrusted evidence and given numbered lines: `D1…` (documents), `I1…` (documents embedded in the installer), and **`F1` = `installer_facts.json` rendered as one `key = value` per line** (e.g. `properties.ProductCode = {…}`, `bundles[0].runtime_requirements[0].platform = Plant3D`). Installer facts are therefore cited and quote-checked exactly like documents. |
 | Instructions | `skills/test-design/SKILL.md` + the host notes catalogue (all `skills/hosts/*.md`) |
 | Output | `TestPlan` (§6.1). Code writes `testcases.yaml` (+ `.json`) and renders `understanding.md` from it. |
 | Self-check (code) | (1) schema valid; (2) every `source.quote` really appears in the cited document text; (3) every `${PLACEHOLDER}` used is listed in `required_env`; (4) **basic coverage (D24):** an INST test observing the install exit code, an INST test observing that the Uninstall entry exists, and a UNIN test observing that the entry is gone; (5) every `expected.check` is a supported type and every `expected.key` is in that test's `observe`; (6) `host_id` is a catalogue entry, `none` or `unknown`, and `host_evidence` quotes are real; (7) test IDs are unique and every precondition refers to an existing test or `ENV-000`. On failure, the error list is sent back and the agent retries, at most 2 times. Still failing → **STOPPED** (D18). |
@@ -164,7 +164,7 @@ Runs right after Agent 1, before Agent 2. Each check logs one line in `run.log`.
 | Item | Spec |
 |---|---|
 | Agent | `agents.Agent(name="test-executor", instructions=<skills>, mcp_servers=[windows_mcp], tools=[record_observation], model=$OPENAI_MODEL)` |
-| MCP server | `MCPServerStdio` launching the **pre-installed** `windows-mcp serve --tools "<allow-list>"`, plus `tool_filter=create_static_tool_filter(allowed_tool_names=[…])`. Per-tool timeout: `AGENT2_TOOL_TIMEOUT_S` (120). |
+| MCP server | `MCPServerStdio` launching the **pre-installed** Windows-MCP **0.8.6** (`windows-mcp serve --transport stdio --tools "<allow-list>"`, built in `execute/windows_mcp.py`), plus `tool_filter=create_static_tool_filter(allowed_tool_names=[…])`. Per-tool timeout: `AGENT2_TOOL_TIMEOUT_S` (120). |
 | Input message | The whole `testcases.yaml` (incl. ENV-000's result), the run folder path (where to save evidence), and the installer path |
 | Instructions | `skills/execute/windows-installer.md` + `skills/execute/evidence.md` + `skills/hosts/<host_id>.md` |
 | Order | ENV (and resolve every `required_env` placeholder) → INST (**silent msiexec**, D26) → UNIN (**UI uninstall**, D27). Run every test; don't skip because of a precondition (D25). |
@@ -188,7 +188,7 @@ Runs right after Agent 1, before Agent 2. Each check logs one line in `run.log`.
 | **WaitFor / Wait** | Wait for dialogs and entries to appear or disappear |
 | **Screenshot** | Evidence after each UI step and at failures (saved to `evidence/` by the trace hook, D31) |
 
-**Blocked (8):** ControlStatus, DisplayInventory, Move, MultiSelect, MultiEdit, Clipboard, Scrape, Notification. They're blocked twice: Windows-MCP `--tools` and the SDK filter.
+**Blocked (7 in Windows-MCP 0.8.6, which has 20 tools):** DisplayInventory, Move, MultiSelect, MultiEdit, Clipboard, Scrape, Notification. They're blocked twice: Windows-MCP `--tools` and the SDK filter. (`ControlStatus`, named in the project README, doesn't exist in 0.8.6; it would be blocked too.)
 
 ### Guardrails (code, run before every MCP call)
 1. **Allow-list** (above), enforced in two places.
@@ -237,7 +237,7 @@ app:
   version: "x.y"
   host_id: autocad-plant3d            # chosen by Agent 1: a host notes id, "none" (standalone) or "unknown"
   host_evidence:                      # why Agent 1 chose it (checked like any citation)
-    - { doc: "I0:installer_facts", quote: "platform=Plant3D" }
+    - { doc: "F1", line: 42, quote: "bundles[0].runtime_requirements[0].platform = Plant3D" }
   host_versions: ["2027"]
   installer: { file: "….msi", type: msi, product_code: "{…}", signer_claimed: "Kleen Software GmbH" }
 summary:                              # rendered into understanding.md
@@ -257,7 +257,7 @@ testcases:
     origin: agent
     category: INST                    # ENV | INST | UNIN   (LOAD | FUNC later)
     title: "Programs and Features entry is created"
-    source: { doc: "I0:installer_facts", quote: "ProductName = …" }
+    source: { doc: "F1", line: 3, quote: "properties.ProductName = …" }
     preconditions: [ENV-000, INST-001]
     steps:                            # plain-language intents for Agent 2
       - "Look up the Uninstall registry entry whose DisplayName matches the product name"
@@ -340,6 +340,7 @@ CodeBase/
 │  │  ├─ agent1.py              # NEW: Agent 1 + retry + writers + ENV-000 injection
 │  │  └─ selfcheck.py           # NEW
 │  └─ execute/
+│     ├─ windows_mcp.py         # BUILT: pinned version, 13-tool allow-list, server factory, tool-list check, save_images
 │     ├─ preflight.py           # NEW: admin, Windows-MCP tool list, ENV-000
 │     ├─ agent2.py              # NEW: Agent 2 + Windows-MCP + record_observation
 │     ├─ guardrails.py          # NEW: PowerShell allow-list, Registry/FileSystem rules
@@ -347,7 +348,7 @@ CodeBase/
 │     ├─ cleanup.py             # NEW
 │     └─ report.py              # NEW (+ templates/report.html.j2)
 ├─ skills/                      # NEW: Markdown skills (§7)
-└─ tests/                       # + test_selfcheck.py, test_verdict.py, test_guardrails.py, test_preflight.py
+└─ tests/                       # + test_selfcheck.py, test_verdict.py, test_guardrails.py, test_preflight.py (test_pipeline.py, test_windows_mcp.py built)
 ```
 
 Nothing in `design/` imports from `execute/`. `pipeline.py` is the only module that uses both.
