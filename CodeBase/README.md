@@ -13,7 +13,11 @@ For the design, see `../ARCHITECTURE.md` (source of truth) and `../ADR.md`.
    uv sync
    ```
    This installs Python 3.12 and every dependency into `.venv`, using the exact versions in `uv.lock`.
-3. Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY` and `OPENAI_MODEL`. Keep `.env` private.
+3. Install Windows-MCP once (pinned; Agent 2 drives the machine through it):
+   ```bash
+   uv tool install windows-mcp==0.8.6
+   ```
+4. Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY` and `OPENAI_MODEL`. Keep `.env` private.
 
 ## Usage
 One command runs the whole pipeline into a new folder `runs/<app>/<timestamp>/`. There are no sub-commands.
@@ -38,6 +42,7 @@ src/mpagent/
   config.py         settings from .env
   runlog.py         run.log (+ console) and trace.jsonl
   design/           S0 intake, S1 installer static read
+  execute/          execution side (so far: windows_mcp.py, the Windows-MCP connection)
 inputs/             one folder per app (see inputs/README.md)
 .env                OpenAI settings (private; template: .env.example)
 ```
