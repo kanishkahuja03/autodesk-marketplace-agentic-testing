@@ -1,0 +1,27 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Visual Studio local state
+.vs/
+*.pyproj.user
+
+# Secrets
+.env
+
+# Run outputs and evidence
+runs/
+
+# Inputs are third-party files (installers, user guides): keep them out of git.
+# Only the folder layout and README are tracked.
+inputs/**/*
+!inputs/README.md
+!inputs/*/
+!inputs/*/.gitkeep
