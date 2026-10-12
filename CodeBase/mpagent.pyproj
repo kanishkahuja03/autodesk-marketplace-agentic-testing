@@ -7,9 +7,9 @@
     <Name>mpagent</Name>
     <RootNamespace>mpagent</RootNamespace>
     <OutputPath>.</OutputPath>
-    <!-- F5 runs the CLI with these arguments, from the CodeBase folder -->
+    <!-- F5 runs the full pipeline for this input folder, from the CodeBase folder (ARCHITECTURE.md D16, D17) -->
     <StartupFile>src\mpagent\cli.py</StartupFile>
-    <CommandLineArguments>design inputs/pid-connector-exporter</CommandLineArguments>
+    <CommandLineArguments>inputs/pid-connector-exporter</CommandLineArguments>
     <WorkingDirectory>.</WorkingDirectory>
     <SearchPath>src</SearchPath>
     <!-- Use the project's own .venv (created by uv) -->

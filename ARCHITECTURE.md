@@ -1,8 +1,8 @@
 # Architecture V2: Generic Plug-in / App Validation Agents
 
-> **Status:** v2.0, 2026-10-12. This is the build plan for the product.
-> **Supersedes:** [`ARCHITECTURE.md`](ARCHITECTURE.md) v0.3. Where they disagree, **this document wins**, including over what is already in `CodeBase/`.
-> **Inputs to this version:** [`ARCHITECTURE_COMPARISON.md`](ARCHITECTURE_COMPARISON.md) (ours vs `AppStore automation/`), [`AGENT_TOOLING_REVIEW.md`](AGENT_TOOLING_REVIEW.md) (tool lists, one by one), [`DESKTOP_UI_AUTOMATION_RESEARCH.md`](DESKTOP_UI_AUTOMATION_RESEARCH.md).
+> **Status:** v2.1, 2026-10-12. This is the build plan for the product. v2.1 adds the grill-me decisions D16–D35: one F5 run, preflight, cleanup, logging, guardrails, `record_observation`.
+> **Supersedes:** [`ARCHITECTURE_old1.md`](ARCHITECTURE_old1.md) (v0.3). Where they disagree, **this document wins**, including over what is already in `CodeBase/`.
+> **Inputs to this version:** [`ARCHITECTURE_COMPARISON.md`](ARCHITECTURE_COMPARISON.md) (ours vs `AppStore automation/`), [`AGENT_TOOLING_REVIEW.md`](AGENT_TOOLING_REVIEW.md) (tool lists, one by one), [`DESKTOP_UI_AUTOMATION_RESEARCH.md`](DESKTOP_UI_AUTOMATION_RESEARCH.md). Decision index: [`ADR.md`](ADR.md).
 
 ---
 
@@ -14,7 +14,7 @@ We build a **generic** two-agent pipeline that takes an app's **documentation an
 - **Agent 1** designs the tests.
 - **Agent 2** runs them on a real Windows machine through a ready-made MCP server.
 
-The goal **now** is a **demo POC with minimal development effort**, built from ready-made parts (OpenAI Agents SDK, Windows-MCP, existing libraries). Cost is not a concern.
+The goal **now** is a **demo POC with minimal development effort**, built from ready-made parts (OpenAI Agents SDK, Windows-MCP, existing libraries). Cost is not a concern. **The whole pipeline runs with one press of the Visual Studio Run button (F5).**
 
 **Generic means:** nothing in the core is tied to Autodesk or any other vendor. Product-specific knowledge lives in **host notes** (Markdown skill files). AutoCAD Plant 3D 2027 is just the first host, and the **P&ID Connector Exporter** is the demo app.
 
@@ -22,57 +22,91 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 
 ## 2. Decisions (final)
 
+### 2.1 Core (D1–D15)
+
 | # | Topic | Decision |
 |---|---|---|
 | D1 | Scope | Generic: any Windows desktop plug-in or standalone app. Host specifics only in host notes. |
 | D2 | LLM | **Enterprise OpenAI API** (platform.openai.com). Model name set in `.env`. Gemini removed. |
 | D3 | Agent framework | **OpenAI Agents SDK** (`openai-agents`, Python) |
 | D4 | Agent 1 | **Blind, single pass.** No tools, no machine access. Output: `understanding.md` + `testcases.yaml`. |
-| D5 | Agent 2 | **One agent session for the whole plan**, driving the machine **only through Windows-MCP**. No action catalogue of our own. |
+| D5 | Agent 2 | **One agent session for the whole plan**, driving the machine **only through Windows-MCP**. No action catalogue of our own. The single local exception is the reporting tool `record_observation` (D30). |
 | D6 | UI interaction | **[Windows-MCP](https://github.com/CursorTouch/Windows-MCP)** (reads the accessibility tree, then clicks, types and takes screenshots) |
 | D7 | Verdict | **Code** compares observed values with expected ones. The LLM never sets PASS/FAIL. |
 | D8 | Demo test levels | **ENV, INST, UNIN** (LOAD and FUNC later) |
 | D9 | Human review gate | **None.** Fully automatic. |
 | D10 | Doc extraction | **Keep the existing `intake.py`** (pypdf, python-docx, bs4) |
-| D11 | Tracing | **Local JSONL only.** OpenAI tracing disabled. |
+| D11 | Tracing | **Local only.** OpenAI tracing disabled. See D19 for the log files. |
 | D12 | Machine | Dev machine, **run as administrator**. Risk accepted. VM later. |
 | D13 | "Skills" | **SKILL.md-style Markdown files** loaded into each agent's instructions. OpenAI's hosted Skills API is not used (it runs in OpenAI's cloud). |
 | D14 | Demo app | P&ID Connector Exporter (Kleen Software) on Plant 3D 2027 |
 | D15 | Host lookup | **Done by Agent 1** (LLM reasoning over documents + installer facts), not by keyword code. Agent 1 picks a `host_id` from the available host notes, or `none` / `unknown`, and cites why. |
 
-**Defaults taken for the open review points** (§C of the tooling review; change there if the team disagrees):
-- PowerShell is allowed, with strict rules.
-- Registry and FileSystem are **read only by instruction**, plus a guardrail.
-- Uninstall uses `msiexec /x` first, then the Control Panel UI if UAC allows.
-- Agent 2 resolves placeholders during ENV.
+### 2.2 Run behaviour, safety and limits (D16–D35, from the grill-me session 2026-10-12)
+
+| # | Topic | Decision |
+|---|---|---|
+| D16 | One Run button | **F5 always runs the full pipeline** (S0 → S1 → Agent 1 → preflight → Agent 2 → verdicts → report → cleanup) into a **new** run folder. There are no sub-commands and no stop switches. |
+| D17 | Input selection | F5 tests **one input folder**, given as the only launch argument in `mpagent.pyproj` (`inputs/<app>`). To switch apps, change that value. |
+| D18 | Agent 1 self-check failure | After 2 retries, the pipeline **stops before Agent 2**. The machine is untouched. It's reported **only in the logs**, with no separate report. |
+| D19 | Logging | Per run: **`run.log`** (readable step status, also shown in the VS console, final `COMPLETED`/`STOPPED` line) and **`trace.jsonl`** (every LLM request/response and MCP call). `report.html` is written **only if Agent 2 ran**. |
+| D20 | Preflight (code, just before Agent 2) | (1) The process is **elevated**. (2) Windows-MCP starts and exposes **exactly the 13 allowed tools**. (3) **ENV-000**: the plug-in is not installed yet (D23). Any failure → `STOPPED`, Agent 2 doesn't start. This runs after Agent 1, so Agent 1 stays blind. |
+| D21 | Windows-MCP install | **Installed once beforehand** (pinned version, setup step in README, next to `uv sync`). F5 only starts it. |
+| D22 | Plug-in already installed | INST and UNIN are **BLOCKED** and nothing is installed. Cleanup is manual. |
+| D23 | ENV-000 | A **built-in test executed by code** in the preflight (registry lookup by ProductCode, or DisplayName as a fallback, from `installer_facts`). It's recorded in the results like any test, with `origin: built-in`. |
+| D24 | Basic test coverage | **Agent 1 writes all other tests.** The **self-check enforces** that there's at least: one INST test observing the install exit code, one INST test observing that the Uninstall entry exists, and one UNIN test observing that the entry is gone. |
+| D25 | Gating | The only hard stops are the preflight checks (incl. ENV-000). All other dependencies are **per-test `preconditions`** written by Agent 1, applied **afterwards** by the verdict engine (→ BLOCKED). Agent 2 simply runs every test. |
+| D26 | Install path | **Silent** `msiexec /i <msi> /qn /l*v <run>\evidence\install.log`. There's no UI install and no automatic UI retry. |
+| D27 | Uninstall path | **UI uninstall** (Programs and Features / Settings → Apps) through Windows-MCP. `msiexec /x` is used only by the cleanup step (D28). |
+| D28 | Cleanup (code, `finally`) | Always runs at the end. If the ProductCode is known **and** the Uninstall entry still exists **and** UNIN didn't complete → `msiexec /x {ProductCode} /qn`, logged as `CLEANUP`. It **never changes a verdict**. Non-MSI → logs "manual cleanup needed". |
+| D29 | Time limits | Agent 2: **150 turns**, **120 s per tool call**, **20 min total** (all in `.env`). If a limit is hit → the run is cancelled, missing tests become ERROR, cleanup runs, and it's logged. |
+| D30 | Observations | Agent 2 reports **per test, as it goes**, through the local tool **`record_observation(test_id, observed, evidence, notes)`**. It appends to `observations.json` and never touches the machine. The final agent output is only a short "done" plus the resolved env values. |
+| D31 | Screenshots | Our trace hook **saves every Windows-MCP screenshot** to `evidence/`. Agent 2 references those files in `record_observation`. *(Verify in the MCP smoke test.)* |
+| D32 | PowerShell control | A code guardrail with an **allow-list of command starts**: `msiexec`, `Get-AuthenticodeSignature`, `Get-ItemProperty`, `Get-ChildItem`, `Test-Path`, `Get-CimInstance Win32_OperatingSystem`, and the admin check. Everything else is **rejected and logged**. |
+| D33 | Registry / FileSystem control | Code guardrail: Registry **read/list only**. FileSystem can read anywhere, but **write/copy/move only inside the run folder** and **never delete**. Rejections are logged and the agent is told why. |
+| D34 | Model | **One `OPENAI_MODEL`** for both agents (the strongest model available to the org). |
+| D35 | Run result | The final `run.log` line is `COMPLETED: n PASS, n FAIL, n BLOCKED, n ERROR — report: …` or `STOPPED: <reason>`. **Exit code:** 0 = completed (even with FAIL tests), 1 = stopped, 2 = unexpected crash. |
+
+**Agent 2 resolves placeholders** (`${PLUGIN_DIR}` etc.) during its ENV tests and returns them in its final output.
 
 ---
 
-## 3. High-level flow
+## 3. High-level flow (one F5 run)
 
 ```
- inputs/<app>/                        DESIGN SIDE (no machine access)
- ├─ *.txt/.pdf/.docx/.html  ──►  [S0 Intake]  ──►  [S1 Installer static read]
- └─ installer (.msi/.exe/.zip)        (code)            (code)
-                                                                │
-                                                                ▼
-                                      ┌──── AGENT 1: Test Designer (OpenAI, no tools) ────┐
-                                      │ skills: test-design + all hosts/*.md (catalogue)  │
-                                      │ decides host_id, then designs the tests           │
-                                      │ output_type = TestPlan  →  self-check → retry ≤2  │
-                                      └───────────────────────────────────────────────────┘
-                                                                │ testcases.yaml, understanding.md
-                                      EXECUTION SIDE            ▼
-                                      ┌──── AGENT 2: Test Executor (OpenAI + Windows-MCP) ──┐
-                                      │ skills: windows-installer + evidence + hosts/<id>   │
-                                      │ one session: ENV → INST → UNIN                      │
-                                      │ output_type = RunObservations (no status)           │
-                                      └───────────────┬─────────────────────────────────────┘
-                                                      │  MCP stdio (13 allowed tools)
-                                                      ▼
-                                           Windows-MCP  ──►  Windows + host app + plug-in
-                                                      │
-                                      [Verdict engine (code)] → [Report] → runs/<app>/<ts>/
+ F5  →  mpagent inputs/<app>                       run folder: runs/<app>/<ts>/   (run.log, trace.jsonl)
+
+ DESIGN SIDE (no machine access)
+   S0 Intake (code)  →  S1 Installer static read (code)
+        │
+        ▼
+   ┌──── AGENT 1: Test Designer (OpenAI, no tools) ─────┐
+   │ skills: test-design + all hosts/*.md (catalogue)   │
+   │ decides host_id, then designs the tests            │
+   │ output_type = TestPlan → self-check → retry ≤2     │──► still failing → STOPPED (exit 1)
+   └────────────────────────────────────────────────────┘
+        │ testcases.yaml, understanding.md
+ EXECUTION SIDE
+        ▼
+   PREFLIGHT (code): elevated? · Windows-MCP = 13 tools? · ENV-000 plug-in not installed?
+        │                                                   └─ any fail → STOPPED (exit 1)
+        ▼
+   ┌──── AGENT 2: Test Executor (OpenAI + Windows-MCP) ──┐
+   │ skills: windows-installer + evidence + hosts/<id>   │
+   │ one session: ENV → INST (silent) → UNIN (UI)        │──► record_observation → observations.json
+   │ guardrails: PowerShell allow-list, read-only        │
+   │ limits: 150 turns · 120 s/tool · 20 min             │
+   └───────────────┬─────────────────────────────────────┘
+                   │ MCP stdio (13 allowed tools)
+                   ▼
+            Windows-MCP ──► Windows + host app + plug-in
+        │
+        ▼
+   VERDICT ENGINE (code) → results.json → report.html
+        │
+   CLEANUP (code, finally): msiexec /x only if still installed and UNIN didn't complete
+        │
+   run.log: COMPLETED … / STOPPED …   (exit 0 / 1 / 2)
 ```
 
 ---
@@ -104,52 +138,69 @@ Keywords can't always identify the host from a description, so **Agent 1 decides
 |---|---|
 | Agent | `agents.Agent(name="test-designer", instructions=<skills>, output_type=TestPlan, model=$OPENAI_MODEL)` |
 | Tools | **None** |
-| Input message | All extracted document text (with doc IDs and line numbers), `installer_facts.json` |
+| Input message | All extracted document text (with doc IDs and line numbers), `installer_facts.json`. Each source is wrapped as untrusted evidence. |
 | Instructions | `skills/test-design/SKILL.md` + the host notes catalogue (all `skills/hosts/*.md`) |
 | Output | `TestPlan` (§6.1). Code writes `testcases.yaml` (+ `.json`) and renders `understanding.md` from it. |
-| Self-check (code) | (1) schema valid; (2) every `source.quote` really appears in the cited document text; (3) every `${PLACEHOLDER}` used is listed in `required_env`; (4) ENV, INST and UNIN each have ≥1 test; (5) every `expected.check` is a supported type; (6) `host_id` is a catalogue entry, `none` or `unknown`, and `host_evidence` quotes are real. On failure, the error list is sent back and the agent retries, at most 2 times. |
-| Rules | Test the plug-in, not the host's API. Never guess (`null` + an open question). Machine values are always placeholders. Every test cites its source. |
+| Self-check (code) | (1) schema valid; (2) every `source.quote` really appears in the cited document text; (3) every `${PLACEHOLDER}` used is listed in `required_env`; (4) **basic coverage (D24):** an INST test observing the install exit code, an INST test observing that the Uninstall entry exists, and a UNIN test observing that the entry is gone; (5) every `expected.check` is a supported type and every `expected.key` is in that test's `observe`; (6) `host_id` is a catalogue entry, `none` or `unknown`, and `host_evidence` quotes are real; (7) test IDs are unique and every precondition refers to an existing test or `ENV-000`. On failure, the error list is sent back and the agent retries, at most 2 times. Still failing → **STOPPED** (D18). |
+| Rules | Test the plug-in, not the host's API. Never guess (`null` + an open question). Machine values are always placeholders. Every test cites its source. Don't write the "already installed" check (it's ENV-000, built in). Make host-dependent tests depend on the host ENV test via `preconditions`. |
+
+After a successful self-check, code **adds ENV-000** to the plan (`origin: built-in`) and makes every INST test depend on it.
 
 ---
 
 ## 5. Execution side
 
+### Preflight (code, new)
+Runs right after Agent 1, before Agent 2. Each check logs one line in `run.log`.
+
+| Check | How | On failure |
+|---|---|---|
+| Elevated | Windows token check (e.g. `IsUserAnAdmin`) | `STOPPED: not running as administrator — start Visual Studio as administrator` |
+| Windows-MCP | Start the pre-installed, pinned Windows-MCP with `--tools <13>`; list its tools | `STOPPED: Windows-MCP not found / tool list mismatch` |
+| **ENV-000** plug-in not installed | Read both Uninstall registry hives (incl. WOW6432Node) for the ProductCode, or the DisplayName as a fallback, from `installer_facts` | Recorded as ENV-000 FAIL; INST/UNIN BLOCKED; `STOPPED: plug-in already installed — uninstall it manually` |
+
 ### Agent 2: Test Executor (new)
 
 | Item | Spec |
 |---|---|
-| Agent | `agents.Agent(name="test-executor", instructions=<skills>, mcp_servers=[windows_mcp], output_type=RunObservations, model=$OPENAI_MODEL)` |
-| MCP server | `MCPServerStdio(command="uvx", args=["windows-mcp==<pinned>", "serve", "--tools", "<allow-list>"])`, plus `tool_filter=create_static_tool_filter(allowed_tool_names=[…])`. It runs in its own Python 3.13 environment managed by uvx. |
-| Input message | The whole `testcases.yaml`, the run folder path (where to save evidence), and the installer path |
+| Agent | `agents.Agent(name="test-executor", instructions=<skills>, mcp_servers=[windows_mcp], tools=[record_observation], model=$OPENAI_MODEL)` |
+| MCP server | `MCPServerStdio` launching the **pre-installed** `windows-mcp serve --tools "<allow-list>"`, plus `tool_filter=create_static_tool_filter(allowed_tool_names=[…])`. Per-tool timeout: `AGENT2_TOOL_TIMEOUT_S` (120). |
+| Input message | The whole `testcases.yaml` (incl. ENV-000's result), the run folder path (where to save evidence), and the installer path |
 | Instructions | `skills/execute/windows-installer.md` + `skills/execute/evidence.md` + `skills/hosts/<host_id>.md` |
-| Order | ENV (and resolve every `required_env` placeholder) → INST → UNIN. A test whose preconditions failed is reported as not run. |
-| Output | `RunObservations` (§6.2): raw observed values per `test_id`, evidence paths, resolved `env`. **No status field.** |
-| `max_turns` | Generous (e.g. 150). Cost is not a concern; the limit just protects against loops. |
+| Order | ENV (and resolve every `required_env` placeholder) → INST (**silent msiexec**, D26) → UNIN (**UI uninstall**, D27). Run every test; don't skip because of a precondition (D25). |
+| Reporting | Call **`record_observation`** right after each test (D30). The final output is only `{ done: true, env: {…} }`. |
+| Limits | `max_turns` 150; total wall-clock limit 20 min (`AGENT2_MAX_TURNS`, `AGENT2_TIMEOUT_MIN`) (D29) |
+
+### `record_observation` (local function tool, new)
+`record_observation(test_id, observed: [{key, value}], evidence: [paths], notes)` checks that `test_id` exists in the plan, then appends to `observations.json`, overwriting an earlier entry for the same test. It has no access to the machine.
 
 ### Windows-MCP tool allow-list (13)
 
 | Tool | Used for |
 |---|---|
-| **PowerShell** | `msiexec /i … /qn /l*v <run>\evidence\install.log`, `msiexec /x {ProductCode}`, exit codes, `Get-AuthenticodeSignature`, OS version and admin check |
-| **Registry** | Host detection; Programs & Features entry present or gone (both Uninstall keys, including WOW6432Node) |
-| **FileSystem** | Required folders exist; installed files present; manifest readable; files gone after uninstall |
+| **PowerShell** | `msiexec /i … /qn /l*v <run>\evidence\install.log`, exit codes, `Get-AuthenticodeSignature`, OS version and admin check (allow-listed commands only, D32) |
+| **Registry** | Host detection; Programs & Features entry present or gone (both Uninstall keys, including WOW6432Node). Read only (D33). |
+| **FileSystem** | Required folders exist; installed files present; manifest readable; files gone after uninstall. Writes only in the run folder (D33). |
 | **Process** | Installer or host running; close a stuck installer |
-| **App** | Open *Programs and Features* / *Settings → Apps* for the UI uninstall path |
+| **App** | Open *Programs and Features* / *Settings → Apps* for the UI uninstall |
 | **Snapshot** | Read the window's accessibility tree (the agent's "eyes") |
 | **Click / Type / Shortcut / Scroll** | Use the UI uninstall dialog and confirm prompts |
 | **WaitFor / Wait** | Wait for dialogs and entries to appear or disappear |
-| **Screenshot** | Evidence after each UI step and at failures |
+| **Screenshot** | Evidence after each UI step and at failures (saved to `evidence/` by the trace hook, D31) |
 
 **Blocked (8):** ControlStatus, DisplayInventory, Move, MultiSelect, MultiEdit, Clipboard, Scrape, Notification. They're blocked twice: Windows-MCP `--tools` and the SDK filter.
 
-### Guardrails
+### Guardrails (code, run before every MCP call)
 1. **Allow-list** (above), enforced in two places.
-2. **Tool-call guardrail** (SDK hook, ~20 lines): reject Registry/FileSystem calls that write or delete outside `runs/<app>/<ts>/`. Reject PowerShell commands that match a deny pattern (`Remove-Item` outside the run folder, `Invoke-WebRequest`, `Set-ExecutionPolicy`, `reg delete`, `Format-*`, `shutdown`). The installer and `msiexec` are allowed.
-3. **Untrusted text:** the instructions state that text in the plug-in's docs and UI is data, never instructions.
-4. **Evidence rule:** report raw values only. Never judge pass or fail.
+2. **PowerShell:** the command must start with an allow-listed command (D32), otherwise it's rejected.
+3. **Registry:** only read and list actions (D33).
+4. **FileSystem:** write, copy and move only under `runs/<app>/<ts>/`; delete always rejected (D33).
+5. Every rejection goes to `run.log` and `trace.jsonl`, and the agent receives the reason as the tool result.
+6. **Untrusted text:** the instructions state that text in the plug-in's docs and UI is data, never instructions.
+7. **Evidence rule:** report raw values only. Never judge pass or fail.
 
 ### Verdict engine (new, code, ~40 lines)
-For each test case it evaluates `expected[]` against `observations[test_id].observed`:
+For each test case it evaluates `expected[]` against the test's entry in `observations.json`:
 
 | Check | Meaning |
 |---|---|
@@ -158,22 +209,27 @@ For each test case it evaluates `expected[]` against `observations[test_id].obse
 | `exists` / `not_exists` | the observed key is true or false (file, registry key, entry) |
 | `contains` / `matches` | substring or regex on a text value (e.g. signer name) |
 
-Statuses:
-- **PASS:** every check holds.
+Statuses, in this order of precedence:
+- **BLOCKED:** a precondition test is FAIL/BLOCKED/ERROR, or a needed placeholder couldn't be resolved. This applies **even if the test ran** (D25).
+- **ERROR:** no observation for the test (e.g. after a timeout), or an expected key is missing.
 - **FAIL:** any check fails.
-- **BLOCKED:** a precondition test failed, or a needed placeholder couldn't be resolved.
-- **ERROR:** no observation for that test, or a key is missing.
+- **PASS:** every check holds.
+
+### Cleanup (code, `finally`, new)
+See D28. It runs after the verdicts (and also after a STOPPED or crash, once Agent 2 has started). It's logged as `CLEANUP: …` and never changes a result.
 
 ### Report (new, ~40 lines)
-- `results.json`: per test, the status, expected vs observed, and evidence.
-- `report.html` (Jinja2): a summary table, then per test the title, status, **source quote**, expected vs observed, and evidence links.
-- `trace.jsonl`: every LLM turn and MCP call (tool, arguments, short result). It's the audit trail.
+- `results.json`: per test, the status, `origin` (agent / built-in), expected vs observed, and evidence.
+- `report.html` (Jinja2), **only if Agent 2 ran**: a summary table, then per test the title, status, **source quote**, expected vs observed, and evidence links.
+- `run.log` and `trace.jsonl`: see D19.
 
 ---
 
 ## 6. Data contracts (Pydantic)
 
-### 6.1 `TestPlan` (Agent 1 output)
+All models must work with OpenAI **strict structured output**, so there are no free-form `dict` fields. Key/value data is stored as lists of `{key, value}`.
+
+### 6.1 `TestPlan` (Agent 1 output; ENV-000 added by code)
 ```yaml
 app:
   name: "P&ID Connector Exporter for Plant 3D"
@@ -191,11 +247,18 @@ summary:                              # rendered into understanding.md
   open_questions: ["…"]
 required_env: [HOST_INSTALL_DIR, PLUGIN_DIR]
 testcases:
+  - id: ENV-000                       # added by code after the self-check
+    origin: built-in
+    category: ENV
+    title: "Plug-in is not installed before the test"
+    observe: [preinstalled_entry_exists]
+    expected: [{ key: preinstalled_entry_exists, check: not_exists }]
   - id: INST-002
+    origin: agent
     category: INST                    # ENV | INST | UNIN   (LOAD | FUNC later)
     title: "Programs and Features entry is created"
     source: { doc: "I0:installer_facts", quote: "ProductName = …" }
-    preconditions: [INST-001]
+    preconditions: [ENV-000, INST-001]
     steps:                            # plain-language intents for Agent 2
       - "Look up the Uninstall registry entry whose DisplayName matches the product name"
     observe: [uninstall_entry_exists, display_version]   # keys Agent 2 must report
@@ -205,19 +268,22 @@ testcases:
     priority: P1
 ```
 
-### 6.2 `RunObservations` (Agent 2 output)
+### 6.2 `observations.json` (written by `record_observation`) + Agent 2 final output
 ```yaml
-env: { HOST_INSTALL_DIR: 'C:\Program Files\Autodesk\AutoCAD 2027', PLUGIN_DIR: '…' }
-observations:
-  - test_id: INST-002
-    executed: true
-    observed: { uninstall_entry_exists: true, display_version: "x.y" }
-    evidence: ["evidence/INST-002_registry.txt"]
-    notes: "Found under HKLM\\…\\Uninstall\\{…}"
+# observations.json: one entry per test, appended as Agent 2 goes
+- test_id: INST-002
+  executed: true
+  observed: [{ key: uninstall_entry_exists, value: true }, { key: display_version, value: "x.y" }]
+  evidence: ["evidence/INST-002_registry.txt"]
+  notes: "Found under HKLM\\…\\Uninstall\\{…}"
+
+# Agent 2 final output
+done: true
+env: [{ key: HOST_INSTALL_DIR, value: 'C:\Program Files\Autodesk\AutoCAD 2027' }, { key: PLUGIN_DIR, value: '…' }]
 ```
 
 ### 6.3 `TestResult` (verdict engine output)
-`{ test_id, status: PASS|FAIL|BLOCKED|ERROR, checks: [{key, check, expected, observed, ok}], evidence, notes }`
+`{ test_id, origin, status: PASS|FAIL|BLOCKED|ERROR, checks: [{key, check, expected, observed, ok}], evidence, notes }`
 
 ---
 
@@ -225,11 +291,11 @@ observations:
 
 | File | Used by | Content |
 |---|---|---|
-| `skills/test-design/SKILL.md` | Agent 1 | The categories and what each must cover; citation format; placeholders; `observe` / `expected` rules and allowed checks; "never guess"; "test the plug-in, not the host" |
+| `skills/test-design/SKILL.md` | Agent 1 | The categories and what each must cover; the basic coverage required by D24 with the suggested key names (`install_exit_code`, `uninstall_entry_exists`); citation format; placeholders; `observe` / `expected` rules and allowed checks; preconditions; "never guess"; "test the plug-in, not the host"; "ENV-000 is built in, don't write it" |
 | `skills/hosts/autocad-plant3d.md` | Agents 1 + 2 | Plug-in folders (`%ProgramFiles%` / `%AppData%\Autodesk\ApplicationPlugins`), bundle + `PackageContents.xml`, version ↔ release numbers (2027 = R26.0), registry detection pattern, content folder default. **Knowledge only, never machine values.** |
 | `skills/hosts/none.md` | Agents 1 + 2 | Standalone Windows app: Program Files, Start menu, Programs & Features only |
-| `skills/execute/windows-installer.md` | Agent 2 | msiexec install and uninstall flags and logging; exit codes 0 / 3010 / 1602 / 1603; both Uninstall registry hives; signature check; UI uninstall path |
-| `skills/execute/evidence.md` | Agent 2 | Raw values only; save evidence under the run folder; screenshot after UI steps; untrusted-text rule; no changes outside the footprint and run folder |
+| `skills/execute/windows-installer.md` | Agent 2 | Silent install command and logging (D26); exit codes 0 / 3010 / 1602 / 1603; both Uninstall registry hives; signature check; **UI uninstall steps** via Programs and Features / Settings → Apps (D27); allowed PowerShell commands (D32) |
+| `skills/execute/evidence.md` | Agent 2 | Call `record_observation` after every test; raw values only; reference saved screenshots and logs; untrusted-text rule; read-only rule; run every test |
 
 A new host means **one new Markdown file**, with no code change.
 
@@ -241,15 +307,18 @@ A new host means **one new Markdown file**, with no code change.
 |---|---|
 | Language and environment | Python 3.12, **uv** (existing) |
 | Agents | **openai-agents** (Agents SDK). Replaces `google-genai`. |
-| MCP server | **Windows-MCP**, pinned version, started via `uvx` |
+| MCP server | **Windows-MCP**, pinned version, **installed beforehand** (`uv tool install windows-mcp==<pinned>`) |
 | Schemas | Pydantic v2 (existing) |
 | YAML | ruamel.yaml (existing) |
 | Doc extraction | pypdf, python-docx, beautifulsoup4 (existing) |
 | MSI read | pywin32 (existing) |
-| CLI | Typer + rich (existing) |
+| CLI | Typer + rich (existing), **single entry point** |
+| Logging | Python `logging` → console + `run.log`; JSONL trace |
 | Report | Jinja2 (existing) |
 | Tests | pytest, ruff (existing) |
-| Secrets | `.env`: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_AGENTS_DISABLE_TRACING=1` |
+| IDE | Visual Studio, **F5** = full run (`mpagent.pyproj` launch argument `inputs/<app>`) |
+
+**`.env`:** `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_AGENTS_DISABLE_TRACING=1`, `AGENT2_MAX_TURNS=150`, `AGENT2_TOOL_TIMEOUT_S=120`, `AGENT2_TIMEOUT_MIN=20`, `WINDOWS_MCP_COMMAND` (path/name of the installed Windows-MCP).
 
 **Dependency change:** remove `google-genai`, add `openai-agents` (+ `python-dotenv` if `.env` isn't already loaded).
 
@@ -260,36 +329,39 @@ A new host means **one new Markdown file**, with no code change.
 ```
 CodeBase/
 ├─ src/mpagent/
-│  ├─ cli.py                    # + commands: design, execute, all
-│  ├─ config.py                 # NEW: .env loading, model name, paths, MCP version
-│  ├─ models.py                 # existing; + TestPlan, RunObservations, TestResult
+│  ├─ cli.py                    # single entry: mpagent <input_dir> → pipeline.run()
+│  ├─ pipeline.py               # NEW: S0 → S1 → Agent 1 → preflight → Agent 2 → verdict → report; finally cleanup; exit codes
+│  ├─ config.py                 # NEW: .env loading, model name, limits, MCP command
+│  ├─ runlog.py                 # NEW: run.log + console logging, trace.jsonl hooks, screenshot saving
+│  ├─ models.py                 # existing; + TestPlan, Observation, TestResult
 │  ├─ design/
 │  │  ├─ intake.py              # existing (keep)
 │  │  ├─ static_read.py, msi.py # existing (keep)
-│  │  ├─ agent1.py              # NEW: Agent 1 + self-check + writers
+│  │  ├─ agent1.py              # NEW: Agent 1 + retry + writers + ENV-000 injection
 │  │  └─ selfcheck.py           # NEW
-│  ├─ execute/
-│  │  ├─ agent2.py              # NEW: Agent 2 + Windows-MCP + guardrails
-│  │  ├─ verdict.py             # NEW
-│  │  └─ report.py              # NEW (+ templates/report.html.j2)
-│  └─ trace.py                  # NEW: local JSONL hooks
+│  └─ execute/
+│     ├─ preflight.py           # NEW: admin, Windows-MCP tool list, ENV-000
+│     ├─ agent2.py              # NEW: Agent 2 + Windows-MCP + record_observation
+│     ├─ guardrails.py          # NEW: PowerShell allow-list, Registry/FileSystem rules
+│     ├─ verdict.py             # NEW
+│     ├─ cleanup.py             # NEW
+│     └─ report.py              # NEW (+ templates/report.html.j2)
 ├─ skills/                      # NEW: Markdown skills (§7)
-└─ tests/                       # + test_selfcheck.py, test_verdict.py
+└─ tests/                       # + test_selfcheck.py, test_verdict.py, test_guardrails.py, test_preflight.py
 ```
 
-Nothing in `design/` imports from `execute/`.
+Nothing in `design/` imports from `execute/`. `pipeline.py` is the only module that uses both.
 
-**CLI:**
+**Entry point (F5 and terminal are the same):**
 ```bash
-uv run mpagent design inputs/pid-connector-exporter    # S0 + S1 + Agent 1 → runs/<app>/<ts>/
-uv run mpagent execute runs/pid-connector-exporter     # Agent 2 + verdicts + report (newest run)
-uv run mpagent all inputs/pid-connector-exporter       # both, fully automatic
+uv run mpagent inputs/pid-connector-exporter
 ```
 
 **Run folder:** `runs/<app>/<ts>/`
+- `run.log`, `trace.jsonl`
 - `intake_manifest.json`, `documents/`, `installer_facts.json`
 - `testcases.yaml`, `testcases.json`, `understanding.md`
-- `observations.json`, `results.json`, `report.html`, `trace.jsonl`, `evidence/`
+- `observations.json`, `results.json`, `report.html` (if Agent 2 ran), `evidence/`
 
 ---
 
@@ -297,25 +369,27 @@ uv run mpagent all inputs/pid-connector-exporter       # both, fully automatic
 
 | # | Step | Done when |
 |---|---|---|
-| 1 | Dependencies + `config.py` (OpenAI key and model, tracing off) | `uv sync` OK; a "hello" agent call works |
-| 2 | Windows-MCP smoke test: start it via `uvx` with the allow-list; an agent lists windows and reads one registry key | Tools visible = exactly the 13; blocked ones absent |
-| 3 | Models: `TestPlan`, `RunObservations`, `TestResult` | Unit tests round-trip YAML and JSON |
+| 1 | Dependencies, `config.py`, `runlog.py`, single-entry `cli.py` + `pipeline.py` skeleton (S0 + S1 wired) | F5 runs S0 + S1 and writes `run.log` with a final status line |
+| 2 | Windows-MCP: pinned install, then a smoke test that lists the tools and takes one screenshot | Exactly the 13 tools visible; it's clear whether screenshots are saved as files (D31) |
+| 3 | Models: `TestPlan`, `Observation`, `TestResult` | Unit tests round-trip YAML and JSON; the SDK accepts `TestPlan` as a strict `output_type` |
 | 4 | Skills: the 5 Markdown files | Reviewed by the team |
-| 5 | Agent 1 (including the host choice) + self-check + writers | `mpagent design` produces a valid `testcases.yaml` for P&ID Exporter with ENV, INST and UNIN, and all quotes verified |
-| 6 | Agent 2 + guardrails + trace | `mpagent execute` installs and uninstalls the plug-in and writes `observations.json` |
-| 7 | Verdict engine + report | `results.json` + `report.html` with correct PASS/FAIL |
-| 8 | `mpagent all` end-to-end demo run | One command from inputs to report |
+| 5 | Agent 1 + self-check (incl. D24) + writers + ENV-000 injection; STOPPED path | F5 produces a valid `testcases.yaml` for P&ID Exporter; a forced self-check failure stops with exit 1 |
+| 6 | Preflight + guardrails | Unit tests for every guardrail rule; F5 without admin stops with exit 1 |
+| 7 | Agent 2 + `record_observation` + limits + cleanup | F5 installs silently, uninstalls via the UI, fills `observations.json`; a forced timeout leads to ERROR + cleanup |
+| 8 | Verdict engine + report | `results.json` + `report.html` with correct PASS/FAIL/BLOCKED/ERROR |
+| 9 | End-to-end demo | One F5 from inputs to `COMPLETED` line and report |
 
 ---
 
 ## 11. Verification (demo acceptance)
 
-1. **Unit:** `uv run pytest`. Self-check catches a fake quote and a missing placeholder. Verdict engine covers every check type and BLOCKED/ERROR.
-2. **Design:** `mpagent design inputs/pid-connector-exporter`. A person reads `understanding.md` and agrees it matches the description. `testcases.yaml` covers ENV, INST and UNIN, and every test cites a real line.
-3. **Execution, positive:** with Plant 3D 2027 installed, `mpagent execute` gives ENV PASS, INST PASS (exit code 0, entry and files present), UNIN PASS (entry and files gone).
-4. **Execution, negative:** run INST checks before installing, or UNIN checks after a manual reinstall, and confirm FAIL is reported correctly (code-decided, not LLM-decided).
-5. **Safety:** the trace shows only allowed tools, and guardrail rejections are logged.
-6. **Evidence:** every test in `report.html` links to a log, a registry dump or a screenshot.
+1. **Unit:** `uv run pytest`. Self-check catches a fake quote, a missing placeholder and missing basic coverage. Verdict engine covers every check type and the BLOCKED/ERROR precedence. Guardrails reject non-allow-listed PowerShell commands, registry writes and file deletes.
+2. **Happy path (F5):** with Plant 3D 2027 installed and the plug-in **not** installed: ENV PASS, INST PASS (exit code 0, entry and files present), UNIN PASS (UI uninstall, entry and files gone). Final line `COMPLETED`, exit 0, no CLEANUP action.
+3. **Already installed:** install the plug-in by hand, then F5 → ENV-000 FAIL, `STOPPED: plug-in already installed`, exit 1, nothing installed.
+4. **Not admin:** F5 from a non-elevated VS → `STOPPED: not running as administrator`, exit 1, the design outputs still exist.
+5. **Interrupted run:** force a timeout during UNIN → missing tests are ERROR, CLEANUP runs `msiexec /x`, and the plug-in is gone afterwards.
+6. **Safety:** the trace shows only allowed tools; guardrail rejections are logged.
+7. **Evidence:** every executed test in `report.html` links to a log, a registry dump or a screenshot.
 
 ---
 
@@ -323,12 +397,14 @@ uv run mpagent all inputs/pid-connector-exporter       # both, fully automatic
 
 | Risk | Mitigation |
 |---|---|
-| PowerShell, Registry and FileSystem can change the machine | Allow-list, deny-pattern guardrail, read-only rules, admin dev machine accepted; VM later |
-| Prompt injection from third-party docs or UI text | Agent 1 has no tools; Agent 2 treats text as data; guardrails |
-| UAC dialog can't be automated | Run elevated; `msiexec` path first; UI uninstall path is best-effort |
-| Windows-MCP is a community project | Pinned version; it's the only external runtime dependency |
-| LLM runs vary slightly | Verdicts by code; the plan is saved; a rerun uses the same YAML |
-| Agent 2 skips a test in a long session | The verdict engine marks missing observations as ERROR; `max_turns` is generous |
+| PowerShell, Registry and FileSystem can change the machine | Allow-list of tools; PowerShell command allow-list; read-only Registry; no deletes; admin dev machine accepted; VM later |
+| Prompt injection from third-party docs or UI text | Agent 1 has no tools; Agent 2 treats text as data; guardrails in code |
+| UAC dialog can't be automated | Preflight requires an elevated VS; silent install; UI uninstall runs elevated |
+| UI uninstall is fragile (dialogs, slow lists) | `WaitFor`, screenshots, time limits; cleanup removes the plug-in if the UI path fails |
+| Windows-MCP is a community project | Pinned version, installed beforehand; preflight checks its tool list |
+| LLM runs vary slightly | Verdicts by code; the plan is saved; a new plan each F5 is accepted (D16) |
+| Agent 2 skips a test in a long session | `record_observation` per test; missing observations → ERROR |
+| A run leaves the plug-in installed | Cleanup in `finally`; otherwise the next run stops at ENV-000 |
 
 ---
 
@@ -339,7 +415,7 @@ From our v0.3 design and from `AppStore automation/`:
 2. **Fixed Level 1 generic suite** (no LLM) for the checks that are the same for every app.
 3. **Test-data catalogue** (approved sample files) for FUNC tests.
 4. **NEEDS_REVIEW** status and a human reviewer report.
-5. **Optional human review gate** (`--approve`).
+5. **Optional human review gate.**
 6. **VM / Windows Sandbox isolation** with checkpoint reset.
 7. **Snapshot diff** to find files left after uninstall.
 8. **Feedback pass:** Agent 2's ENV findings go back to Agent 1.
@@ -347,3 +423,4 @@ From our v0.3 design and from `AppStore automation/`:
 10. **EXE / ZIP installer readers**; submission bundle with `publisher_test_notes`.
 11. **Host command channels** (e.g. COM) declared in host notes.
 12. **Robot or TestRail export** from `testcases.yaml`.
+13. **Testing both uninstall paths** (silent and UI) in one run, with a reinstall in between.
