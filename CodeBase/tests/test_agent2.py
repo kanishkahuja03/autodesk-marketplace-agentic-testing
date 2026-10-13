@@ -66,6 +66,31 @@ def test_record_rejects_unknown_and_built_in_ids(tmp_path):
     assert load_observations(tmp_path) == []
 
 
+def test_record_rejects_evidence_files_that_dont_exist(tmp_path):
+    # run 20261012-191028: Agent 2 listed evidence/install.log although msiexec never wrote it
+    obs = agent2.ObservationRecorder(tmp_path, plan(), CallRecorder(tmp_path, Trace(tmp_path)), Trace(tmp_path))
+    exit_code = [KeyValue(key="install_exit_code", value=0)]
+
+    reply = obs.record("INST-001", True, exit_code, ["evidence/install.log"], None)
+    assert reply.startswith("Not recorded") and load_observations(tmp_path) == []
+    assert "Not recorded" in obs.record("INST-001", True, exit_code, ["../../outside.txt"], None)
+
+    (tmp_path / "evidence").mkdir()
+    (tmp_path / "evidence" / "install.log").write_text("Installation success or error status: 0.", encoding="utf-8")
+    assert obs.record("INST-001", True, exit_code, ["evidence/install.log"], None) == "Recorded INST-001."
+
+
+def test_evidence_folder_exists_before_agent2_starts(tmp_path, monkeypatch):
+    seen = {}
+
+    async def fake_run(_plan, run_dir, *_a):
+        seen["evidence"] = (run_dir / "evidence").is_dir()
+        return agent2.Agent2Result(done=True, env=[])
+    monkeypatch.setattr(agent2, "_run", fake_run)
+    agent2.run_agent2(plan(), tmp_path, tmp_path / "x.msi", load_settings())
+    assert seen["evidence"] is True
+
+
 def test_time_limit_becomes_agent2_error(tmp_path, monkeypatch):
     async def slow(*_args):
         await asyncio.sleep(5)

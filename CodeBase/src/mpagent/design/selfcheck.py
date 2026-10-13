@@ -65,7 +65,7 @@ def check_plan(plan: TestPlan, sources: list[Source], host_ids: Iterable[str]) -
         else:
             check_citation(f"{t.id}.source", t.source)
         _check_expectations(t, errors)
-        for text in _texts_of(t):
+        for text in texts_of(t):
             if USER_PROFILE_PATH.search(text):
                 errors.append(f"{t.id}: hard-coded user profile path {text!r}; use a placeholder or %AppData%")
 
@@ -80,7 +80,7 @@ def check_plan(plan: TestPlan, sources: list[Source], host_ids: Iterable[str]) -
         errors.append(f"preconditions form a cycle: {' -> '.join(cycle)}")
 
     # placeholders
-    used = {name for t in plan.testcases for text in _texts_of(t) for name in PLACEHOLDER.findall(text)}
+    used = {name for t in plan.testcases for text in texts_of(t) for name in PLACEHOLDER.findall(text)}
     for name in sorted(used - set(plan.required_env)):
         errors.append(f"placeholder ${{{name}}} is used but not listed in required_env")
 
@@ -111,7 +111,7 @@ def _check_expectations(t: TestCase, errors: list[str]) -> None:
                 errors.append(f"{t.id}: 'matches' pattern for '{e.key}' is not a valid regular expression ({exc})")
 
 
-def _texts_of(t: TestCase) -> list[str]:
+def texts_of(t: TestCase) -> list[str]:
     """Strings Agent 2 will act on or code will compare: steps and expected values."""
     out = list(t.steps)
     for e in t.expected:

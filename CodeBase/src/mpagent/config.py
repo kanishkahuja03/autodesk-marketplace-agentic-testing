@@ -50,8 +50,9 @@ class Settings:
         from agents import OpenAIChatCompletionsModel
         from openai import AsyncOpenAI
 
-        # a slow free-tier request must not block F5 for the client's default 10 min x retries
-        client = AsyncOpenAI(base_url=GEMINI_OPENAI_URL, api_key=self.gemini_api_key, timeout=180, max_retries=1)
+        # a slow free-tier request must not block F5 for the client's default 10 min; the free tier's
+        # per-minute token quota (HTTP 429, "retry in ~11 s") is ridden out by the client's backoff retries
+        client = AsyncOpenAI(base_url=GEMINI_OPENAI_URL, api_key=self.gemini_api_key, timeout=180, max_retries=6)
         return OpenAIChatCompletionsModel(model=self.gemini_model, openai_client=client)
 
 

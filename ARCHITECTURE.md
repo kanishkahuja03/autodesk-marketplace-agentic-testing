@@ -56,13 +56,13 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 | D23 | ENV-000 | A **built-in test executed by code** in the preflight (registry lookup by ProductCode, or DisplayName as a fallback, from `installer_facts`). It's recorded in the results like any test, with `origin: built-in`. |
 | D24 | Basic test coverage | **Agent 1 writes all other tests.** The **self-check enforces** that there's at least: one INST test observing the install exit code, one INST test observing that the Uninstall entry exists, and one UNIN test observing that the entry is gone. |
 | D25 | Gating | The only hard stops are the preflight checks (incl. ENV-000). All other dependencies are **per-test `preconditions`** written by Agent 1, applied **afterwards** by the verdict engine (→ BLOCKED). Agent 2 simply runs every test. |
-| D26 | Install path | **Silent** `msiexec /i <msi> /qn /l*v <run>\evidence\install.log`. There's no UI install and no automatic UI retry. |
+| D26 | Install path | **Silent** `msiexec /i <msi> /qn /l*v <run>\evidence\install.log`. There's no UI install and no automatic UI retry. Code **creates `evidence\` before Agent 2 starts** (otherwise msiexec can't open its log and aborts at once). Agent 2 runs the install **once** and takes `install_exit_code` from the log's `success or error status: N` line (via `Select-String`), never from PowerShell's own status code; no log or no result line → `null`. *(Lessons from run 20261012-191028.)* |
 | D27 | Uninstall path | **UI uninstall** (Programs and Features / Settings → Apps) through Windows-MCP. `msiexec /x` is used only by the cleanup step (D28). |
 | D28 | Cleanup (code, `finally`) | Always runs at the end. If the ProductCode is known **and** the Uninstall entry still exists **and** UNIN didn't complete → `msiexec /x {ProductCode} /qn`, logged as `CLEANUP`. It **never changes a verdict**. Non-MSI → logs "manual cleanup needed". |
 | D29 | Time limits | Agent 2: **150 turns**, **120 s per tool call**, **20 min total** (all in `.env`). If a limit is hit → the run is cancelled, missing tests become ERROR, cleanup runs, and it's logged. |
-| D30 | Observations | Agent 2 reports **per test, as it goes**, through the local tool **`record_observation(test_id, observed, evidence, notes)`**. It appends to `observations.json` and never touches the machine. The final agent output is only a short "done" plus the resolved env values. |
+| D30 | Observations | Agent 2 reports **per test, as it goes**, through the local tool **`record_observation(test_id, observed, evidence, notes)`**. It appends to `observations.json` and never touches the machine. It **rejects evidence files that don't exist** in the run folder (Agent 2 must then record again with real files and only values it actually saw). The final agent output is only a short "done" plus the resolved env values. |
 | D31 | Screenshots | Our trace hook **saves every Windows-MCP screenshot** to `evidence/`, and code **attaches every screenshot taken since the previous `record_observation` call to the next one** automatically. Agent 2 lists only other evidence files (e.g. `evidence/install.log`). *Verified on Windows-MCP 0.8.6: `Screenshot` returns the PNG inline as base64 (plus a text block with the cursor position and coordinate scale) and saves no file, so our code must save it (`execute/windows_mcp.py: save_images`).* |
-| D32 | PowerShell control | A code guardrail with an **allow-list of command starts**: `Start-Process -FilePath msiexec.exe` (with `-Wait -PassThru`; a bare `msiexec` call returns before the install finishes and gives no exit code), `Get-AuthenticodeSignature`, `Get-ItemProperty`, `Get-ChildItem`, `Test-Path`, `Get-CimInstance Win32_OperatingSystem`, and the admin check. Everything else is **rejected and logged**. |
+| D32 | PowerShell control | A code guardrail with an **allow-list of command starts**: `Start-Process -FilePath msiexec.exe` (with `-Wait -PassThru`; a bare `msiexec` call returns before the install finishes and gives no exit code), `Get-AuthenticodeSignature`, `Get-ItemProperty`, `Get-ChildItem`, `Test-Path`, `Select-String` (read-only search, e.g. the result line of `install.log`), `Get-CimInstance Win32_OperatingSystem`, and the admin check. The command may not contain `;`, `&`, `{ }` (except GUIDs), `$( )`, backticks, redirection or line breaks, and pipes may only go into output-shaping commands (`Select-Object`, `Format-List`, `Format-Table`, `Sort-Object`, `Measure-Object`, `Out-String`, `ConvertTo-Json`). Everything else is **rejected and logged**. |
 | D33 | Registry / FileSystem control | Code guardrail: Registry **read/list only**. FileSystem can read anywhere, but **write/copy/move only inside the run folder** and **never delete**. Rejections are logged and the agent is told why. |
 | D34 | Model | **One `OPENAI_MODEL`** for both agents (the strongest model available to the org). |
 | D35 | Run result | The final `run.log` line is `COMPLETED: n PASS, n FAIL, n BLOCKED, n ERROR — report: …` or `STOPPED: <reason>`. **Exit code:** 0 = completed (even with FAIL tests), 1 = stopped, 2 = unexpected crash. |
@@ -172,13 +172,13 @@ Runs right after Agent 1, before Agent 2. Each check logs one line in `run.log`.
 | Limits | `max_turns` 150; total wall-clock limit 20 min (`AGENT2_MAX_TURNS`, `AGENT2_TIMEOUT_MIN`) (D29) |
 
 ### `record_observation` (local function tool, new)
-`record_observation(test_id, observed: [{key, value}], evidence: [paths], notes)` checks that `test_id` exists in the plan, then appends to `observations.json`, overwriting an earlier entry for the same test. It has no access to the machine.
+`record_observation(test_id, executed, observed: [{key, value}], evidence: [paths], notes)` checks that `test_id` exists in the plan (ENV-000 is refused: code records it) and that every evidence path is an existing file inside the run folder. It then adds the screenshots taken since the previous call and appends to `observations.json`, overwriting an earlier entry for the same test. It has no access to the machine.
 
 ### Windows-MCP tool allow-list (13)
 
 | Tool | Used for |
 |---|---|
-| **PowerShell** | `Start-Process -FilePath msiexec.exe -ArgumentList '/i',…,'/qn','/norestart','/l*v','<run>\evidence\install.log' -Wait -PassThru` (exit code), `Get-AuthenticodeSignature`, OS version and admin check (allow-listed commands only, D32) |
+| **PowerShell** | `Start-Process -FilePath msiexec.exe -ArgumentList '/i',…,'/qn','/norestart','/l*v','<run>\evidence\install.log' -Wait -PassThru`, then `Select-String` on `install.log` for the real exit code (D26), `Get-AuthenticodeSignature`, OS version and admin check (allow-listed commands only, D32) |
 | **Registry** | Host detection; Programs & Features entry present or gone (both Uninstall keys, including WOW6432Node). Read only (D33). |
 | **FileSystem** | Required folders exist; installed files present; manifest readable; files gone after uninstall. Writes only in the run folder (D33). |
 | **Process** | Installer or host running; close a stuck installer |
@@ -348,11 +348,13 @@ CodeBase/
 │     ├─ observations.py        # BUILT: observations.json (shared by preflight and record_observation)
 │     ├─ agent2.py              # BUILT: Agent 2 + Windows-MCP + record_observation + limits
 │     ├─ guardrails.py          # BUILT: PowerShell allow-list, Registry/FileSystem/Process rules
-│     ├─ verdict.py             # NEW
+│     ├─ verdict.py             # BUILT: PASS/FAIL/BLOCKED/ERROR from observations (code only)
 │     ├─ cleanup.py             # BUILT: msiexec /x if the app is still installed at the end
-│     └─ report.py              # NEW (+ templates/report.html.j2)
+│     ├─ report.py              # BUILT: results.json + report.html
+│     └─ templates/             # BUILT: report.html.j2
 ├─ skills/                      # NEW: Markdown skills (§7)
-└─ tests/                       # + test_verdict.py (built: test_pipeline, test_windows_mcp, test_models, test_skills, test_selfcheck, test_agent1, test_guardrails, test_preflight)
+└─ tests/                       # BUILT: test_pipeline, test_windows_mcp, test_models, test_skills, test_selfcheck,
+                                #        test_agent1, test_guardrails, test_preflight, test_agent2, test_verdict
 ```
 
 Nothing in `design/` imports from `execute/`. `pipeline.py` is the only module that uses both.

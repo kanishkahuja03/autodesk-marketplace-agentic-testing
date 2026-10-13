@@ -12,6 +12,7 @@ The PowerShell tool only accepts commands that **start with** one of these; anyt
 - `Start-Process -FilePath msiexec.exe …` (install, and uninstall only if a step says so)
 - `Get-AuthenticodeSignature …`
 - `Get-ItemProperty …`, `Get-ChildItem …`, `Test-Path …`
+- `Select-String …` (search a file, e.g. the install log)
 - `Get-CimInstance Win32_OperatingSystem …`
 - `([Security.Principal.WindowsPrincipal]…` (admin check)
 
@@ -21,8 +22,16 @@ Use the **Registry** and **FileSystem** tools for reads when you can. Both are r
 ```powershell
 Start-Process -FilePath msiexec.exe -ArgumentList '/i','"<INSTALLER_PATH>"','/qn','/norestart','/l*v','"<RUN_DIR>\evidence\install.log"' -Wait -PassThru | Select-Object -ExpandProperty ExitCode
 ```
-- Use `-Wait -PassThru`: without it, msiexec returns before the install has finished.
-- Report the number as `install_exit_code`, and `evidence/install.log` as evidence.
+- Use `-Wait -PassThru`: without it, msiexec returns before the install has finished. The `evidence` folder already exists.
+- **Run the install only once.** Running it again would test something else (a repair or a second install).
+- **Then always read the real result from the log**, even if PowerShell printed a number:
+  ```powershell
+  Select-String -Path "<RUN_DIR>\evidence\install.log" -Pattern "success or error status", "MainEngineThread is returning"
+  ```
+  The number after `error status:` (or after `is returning`) is the msiexec exit code. Report **that** number as `install_exit_code`. If it differs from what PowerShell printed, use the log's number and mention both in `notes`.
+- The PowerShell tool's own `Status Code` is **not** msiexec's exit code. Never report it as `install_exit_code`.
+- If there is no log or no result line, report `install_exit_code: null` and say why in `notes`. Never guess a value.
+- Report `evidence/install.log` as evidence only if the file exists (record_observation rejects missing files).
 - Exit codes: `0` success · `3010` success, restart needed · `1602` cancelled · `1603` fatal error · `1618` another install is running · `1638` another version is already installed. Report the code; don't interpret it.
 - Use a tool timeout long enough for the installer (e.g. `timeout` 300).
 

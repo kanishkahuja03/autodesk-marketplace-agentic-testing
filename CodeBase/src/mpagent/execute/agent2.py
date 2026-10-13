@@ -68,6 +68,13 @@ class ObservationRecorder:
             return "ENV-000 is recorded by code; don't record it."
         if test_id not in self.ids:
             return f"Unknown test_id {test_id!r}; use one of: {', '.join(sorted(self.ids - {BUILT_IN_ENV_ID}))}"
+        missing = [e for e in evidence if not self._exists_in_run_dir(e)]
+        if missing:  # evidence must be real files, never names of files that should have been written
+            self.trace.write("record_observation_rejected", test_id=test_id, missing_evidence=missing)
+            log.warning("  %s: record_observation rejected, evidence not found: %s", test_id, ", ".join(missing))
+            return (f"Not recorded: these evidence files don't exist in the run folder: {', '.join(missing)}. "
+                    "Record again listing only files that exist (or none), and report only values you actually "
+                    "saw in a tool result (use null otherwise).")
         obs = Observation(test_id=test_id, executed=executed, observed=observed,
                           evidence=list(evidence) + self.recorder.take_pending(), notes=notes)
         save_observation(self.run_dir, obs)
@@ -75,6 +82,10 @@ class ObservationRecorder:
         log.info("  %s observed: %s%s", test_id, ", ".join(f"{kv.key}={kv.value!r}" for kv in observed) or "-",
                  "" if executed else " (not executed)")
         return f"Recorded {test_id}."
+
+    def _exists_in_run_dir(self, rel: str) -> bool:
+        path = (self.run_dir / rel).resolve()
+        return path.is_relative_to(self.run_dir.resolve()) and path.is_file()
 
 
 def make_record_observation(observations: ObservationRecorder):
@@ -120,6 +131,8 @@ async def _run(plan: TestPlan, run_dir: Path, installer_path: Path, settings: Se
 def run_agent2(plan: TestPlan, run_dir: Path, installer_path: Path, settings: Settings) -> Agent2Result:
     if settings.uses_temporary_gemini:
         log.warning("Agent 2 uses the TEMPORARY Gemini fallback (%s); no OpenAI key set", settings.gemini_model)
+    # msiexec can't open its log in a missing folder and then aborts at once (run 20261012-191028)
+    (run_dir / "evidence").mkdir(exist_ok=True)
     limit_s = settings.agent2_timeout_min * 60
     try:
         out = asyncio.run(asyncio.wait_for(_run(plan, run_dir, installer_path, settings), timeout=limit_s))

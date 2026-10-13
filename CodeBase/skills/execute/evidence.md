@@ -15,8 +15,10 @@ Call `record_observation` **right after you finish each test**, before starting 
 
 Run **every** test in the plan, in order (ENV → INST → UNIN), even if an earlier test looked wrong. Code applies the preconditions afterwards. ENV-000 has already been checked by code; don't repeat it.
 
-## 2. Never judge
+## 2. Never judge, never guess
 Don't write PASS, FAIL, "looks fine" or "should be OK". Report what you saw. The verdict is computed by code from your values and the test's `expected` checks.
+
+**Every value must come from a tool result you actually received in this run.** If a tool failed, returned an error, or returned output you can't read (e.g. `#< CLIXML … Preparing modules for first use`, which is noise), you don't have the value: report `null` and describe the problem in `notes`. A wrong value is worse than `null`. Evidence files you list must exist; `record_observation` rejects files that don't.
 
 ## 3. Screenshots
 - Take a `Screenshot` after each UI step that changes the screen (window opened, button clicked, dialog confirmed) and whenever something unexpected happens.

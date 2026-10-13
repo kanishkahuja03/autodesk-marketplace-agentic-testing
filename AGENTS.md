@@ -35,8 +35,8 @@ Built with Python 3.12, uv, the OpenAI Agents SDK and Windows-MCP. AutoCAD Plant
 - `AGENT_TOOLING_REVIEW.md`, `ARCHITECTURE_COMPARISON.md`, `DESKTOP_UI_AUTOMATION_RESEARCH.md`, `AGENT_FUNDAMENTALS.md`, `PROBLEM_STATEMENT.md` : supporting docs
 - `AppStore automation/` : the alternative design that was compared. Reference only, do not build there.
 - `CodeBase/` : the product (Python package `mpagent`)
-  - `src/mpagent/` : source (`design/` = S0, S1 and Agent 1; `execute/` = Agent 2, verdict and report, to be added)
-  - `skills/` : runtime skills loaded into the agents (to be added, see ARCHITECTURE.md §7)
+  - `src/mpagent/` : source (`cli.py` single entry point, `pipeline.py` step order; `design/` = S0, S1 and Agent 1; `execute/` = preflight, guardrails, Agent 2, cleanup, verdict and report)
+  - `skills/` : runtime skills loaded into the agents (`test-design/`, `hosts/`, `execute/`; see ARCHITECTURE.md §7)
   - `tests/` : pytest unit tests
   - `inputs/<app>/` : third-party input files (git-ignored)
   - `runs/<app>/<timestamp>/` : run outputs and evidence (git-ignored)

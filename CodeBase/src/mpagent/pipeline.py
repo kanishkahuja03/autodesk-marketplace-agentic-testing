@@ -1,7 +1,7 @@
 """The full pipeline behind the single entry point (ARCHITECTURE.md D16).
 
-S0 intake -> S1 installer static read -> Agent 1 -> preflight -> Agent 2 -> cleanup (finally)
--> (verdict -> report: added in a later build step). Every run gets its own run folder with run.log and a
+S0 intake -> S1 installer static read -> Agent 1 -> preflight -> Agent 2 -> cleanup -> verdicts -> report
+(the last three always run once Agent 2 has started). Every run gets its own run folder with run.log and a
 final status line: COMPLETED (exit 0), STOPPED (exit 1) or CRASHED (exit 2).
 """
 
@@ -18,7 +18,8 @@ from mpagent.execute.agent2 import Agent2Error, run_agent2
 from mpagent.execute.cleanup import cleanup
 from mpagent.execute.observations import load_observations
 from mpagent.execute.preflight import PreflightError, run_preflight
-from mpagent.models import InstallerFacts, IntakeManifest, TestPlan
+from mpagent.execute.report import REPORT_FILE, summary_line, write_report
+from mpagent.models import InstallerFacts, IntakeManifest, RunResults, TestPlan
 from mpagent.runlog import (
     attach_run_folder,
     log,
@@ -59,9 +60,10 @@ def run(input_dir: Path, runs_dir: Path | None = None, agent1_ask: AskFn | None 
         log.info("RUN: input %s", input_dir.resolve())
         design = _design_side(input_dir, runs_dir or settings.runs_dir, settings, agent1_ask)
         _preflight(design.run_dir, design.facts, settings)
-        _execution_side(design, settings)
-        log.info("COMPLETED: tests executed, observations in observations.json; verdicts and report are not built "
-                 "yet. Run folder: %s", design.run_dir)
+        run_results = _execution_side(design, settings)
+        if run_results is None:
+            raise PipelineStopped("the report could not be written (see the error above)")
+        log.info("COMPLETED: %s — report: %s", summary_line(run_results), design.run_dir / REPORT_FILE)
         return EXIT_COMPLETED
     except PipelineStopped as e:
         log.error("STOPPED: %s%s", e, _no_run_folder_note())
@@ -87,9 +89,10 @@ def _preflight(run_dir: Path, facts: InstallerFacts, settings: Settings) -> None
     log.info("Preflight: done")
 
 
-def _execution_side(design: Design, settings: Settings) -> None:
-    """Agent 2, then cleanup in `finally` (D28), whatever happened."""
+def _execution_side(design: Design, settings: Settings) -> RunResults | None:
+    """Agent 2, then (in `finally`, whatever happened) cleanup (D28) and verdicts + report (D19, D29)."""
     log.info("Agent 2 test execution: start")
+    run_results: RunResults | None = None
     try:
         run_agent2(design.plan, design.run_dir, design.installer_path, settings)
         log.info("Agent 2 test execution: done")
@@ -101,6 +104,21 @@ def _execution_side(design: Design, settings: Settings) -> None:
             cleanup(design.run_dir, design.facts)
         except Exception as e:  # noqa: BLE001 - cleanup must never hide the real outcome
             log.error("CLEANUP: failed with %s: %s — manual cleanup may be needed", type(e).__name__, e)
+        run_results = _verdicts_and_report(design)
+    return run_results
+
+
+def _verdicts_and_report(design: Design) -> RunResults | None:
+    log.info("Verdicts and report: start")
+    try:
+        run_results = write_report(design.plan, design.run_dir)
+    except Exception as e:  # noqa: BLE001 - a report problem must not hide the Agent 2 outcome
+        log.error("REPORT: failed with %s: %s", type(e).__name__, e)
+        return None
+    for r in run_results.results:
+        log.info("  %-8s %-7s %s", r.test_id, r.status.value, r.notes or "")
+    log.info("Verdicts and report: done -> results.json, report.html")
+    return run_results
 
 
 def _log_missing_observations(design: Design) -> None:

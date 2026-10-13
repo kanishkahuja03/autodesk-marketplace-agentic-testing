@@ -24,6 +24,7 @@ PS_ALLOWED_STARTS = (
     "get-itemproperty ",
     "get-childitem ",
     "test-path ",
+    "select-string ",  # read-only search, e.g. the result line of install.log
     "get-ciminstance win32_operatingsystem",
     "([security.principal.windowsprincipal]",
 )

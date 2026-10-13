@@ -66,7 +66,9 @@ def test_real_plugin_full_run_completes(tmp_path, no_machine):
     for name in ("installer_facts.json", "testcases.yaml", "testcases.json", "understanding.md", "trace.jsonl"):
         assert (run_dir / name).exists(), name
     assert no_machine == {"agent2": 1, "cleanup": 1}
-    assert " COMPLETED: " in _last_line(run_dir)
+    assert (run_dir / "results.json").exists() and (run_dir / "report.html").exists()
+    last = _last_line(run_dir)
+    assert " COMPLETED: " in last and "report:" in last  # stand-in Agent 2 recorded nothing: all ERROR/BLOCKED
 
 
 @needs_real_inputs
@@ -77,9 +79,11 @@ def test_agent2_failure_stops_after_cleanup(tmp_path, no_machine, monkeypatch):
     code = pipeline.run(REAL_PLUGIN, tmp_path / "runs", agent1_ask=fake_ask(good_plan_data()))
     assert code == pipeline.EXIT_STOPPED
     assert no_machine["cleanup"] == 1
-    log_lines = (_only_run_dir(tmp_path / "runs") / RUN_LOG).read_text(encoding="utf-8").splitlines()
-    assert "observations: 0 of 4 tests recorded; missing: ENV-000, INST-001, INST-002, UNIN-001" in log_lines[-2]
-    assert "STOPPED: Agent 2 didn't finish: time limit reached (20 min)" in log_lines[-1]
+    run_dir = _only_run_dir(tmp_path / "runs")
+    log_text = (run_dir / RUN_LOG).read_text(encoding="utf-8")
+    assert "observations: 0 of 4 tests recorded; missing: ENV-000, INST-001, INST-002, UNIN-001" in log_text
+    assert (run_dir / "report.html").exists()  # the report is still written for a cut-off run
+    assert "STOPPED: Agent 2 didn't finish: time limit reached (20 min)" in _last_line(run_dir)
 
 
 @needs_real_inputs

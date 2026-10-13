@@ -331,3 +331,13 @@ class TestResult(BaseModel):
     checks: list[CheckResult]
     evidence: list[str]
     notes: str | None
+
+
+class RunResults(BaseModel):
+    """results.json: every verdict of one run plus the counts per status."""
+
+    app: str
+    run_folder: str
+    agent2_finished: bool
+    counts: dict[str, int]
+    results: list[TestResult]

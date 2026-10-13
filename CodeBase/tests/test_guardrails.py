@@ -26,6 +26,8 @@ def ps(command, run_dir):
     'Get-AuthenticodeSignature -FilePath "C:\\in\\x.msi" | Format-List Status, StatusMessage, SignerCertificate',
     f"Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{GUID}'",
     "Get-ChildItem Env:APPDATA",
+    ('Select-String -Path "C:\\runs\\evidence\\install.log" -Pattern "success or error status", '
+     '"MainEngineThread is returning"'),
     "test-path 'C:\\Users\\x\\AppData\\Roaming\\Autodesk\\ApplicationPlugins\\pidExport.bundle'",
     "Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, OSArchitecture",
     ("([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent())"
