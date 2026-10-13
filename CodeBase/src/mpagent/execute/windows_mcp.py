@@ -5,6 +5,8 @@ Windows-MCP's own --tools flag and the Agents SDK tool filter.
 """
 
 import base64
+import html
+import re
 import shutil
 from pathlib import Path
 
@@ -65,7 +67,7 @@ class CallRecorder:
         self.count = 0
         self.pending: list[str] = []
 
-    def record(self, tool: str, arguments: dict | None, result) -> None:
+    def record(self, tool: str, arguments: dict | None, result, cleaned_chars: int | None = None) -> None:
         self.count += 1
         saved = save_images(result.content, self.evidence_dir, f"{self.count:03d}_{tool}")
         rel = [p.relative_to(self.run_dir).as_posix() for p in saved]
@@ -73,7 +75,8 @@ class CallRecorder:
         text = " ".join(getattr(c, "text", "") for c in result.content if getattr(c, "type", None) == "text")
         is_error = getattr(result, "is_error", getattr(result, "isError", None))
         self.trace.write("mcp_call", n=self.count, tool=tool, arguments=arguments, is_error=is_error,
-                         text=text[:2000], images=rel)
+                         text=text[:TRACE_TEXT_CHARS], text_chars=len(text), sent_to_model_chars=cleaned_chars,
+                         images=rel)
 
     def take_pending(self) -> list[str]:
         out, self.pending = self.pending, []
@@ -85,11 +88,51 @@ class RecordingMCPServer(MCPServerStdio):
 
     async def call_tool(self, tool_name, arguments, meta=None):
         result = await super().call_tool(tool_name, arguments, meta)
+        cleaned = clean_result(result)
         try:
-            self.recorder.record(tool_name, arguments, result)
+            self.recorder.record(tool_name, arguments, result, cleaned_chars=_text_chars(cleaned))
         except Exception as e:  # noqa: BLE001 - recording evidence must never break the tool call itself
             log.warning("could not record MCP call %s: %s: %s", tool_name, type(e).__name__, e)
-        return result
+        return cleaned
+
+
+# ---------------------------------------------------------------- what the model gets back
+# Run 20261013-131217: one FileSystem read of a 354 KB UTF-16 install.log overflowed gpt-4o-mini's context window.
+# Every PowerShell result also carries CLIXML progress noise that hides the real output and errors.
+
+MAX_RESULT_CHARS = 20_000
+TRACE_TEXT_CHARS = 20_000
+_CLIXML = re.compile(r"#< CLIXML\s*(<Objs\b.*?</Objs>)", re.DOTALL)
+_ERROR_LINE = re.compile(r'<S S="Error">(.*?)</S>', re.DOTALL)
+_XML_CHAR = re.compile(r"_x([0-9A-Fa-f]{4})_")
+
+
+def clean_text(text: str) -> str:
+    """Replace PowerShell CLIXML blocks by their error lines (progress records are dropped), then cap the size."""
+
+    def readable(match: re.Match) -> str:
+        lines = (_XML_CHAR.sub(lambda m: chr(int(m.group(1), 16)), html.unescape(s))
+                 for s in _ERROR_LINE.findall(match.group(1)))
+        errors = "".join(lines).strip()
+        return f"(PowerShell error output)\n{errors}\n" if errors else "(no output)\n"
+
+    text = _CLIXML.sub(readable, text)
+    if len(text) > MAX_RESULT_CHARS:
+        text = (text[:MAX_RESULT_CHARS] + f"\n[... truncated: {len(text) - MAX_RESULT_CHARS:,} more characters not "
+                "shown. Read only the part you need: Select-String for a pattern, or FileSystem read with "
+                "offset and limit.]")
+    return text
+
+
+def clean_result(result):
+    """A copy of an MCP CallToolResult with every text item cleaned; images are passed on unchanged."""
+    content = [c.model_copy(update={"text": clean_text(c.text)}) if getattr(c, "type", None) == "text" else c
+               for c in result.content]
+    return result.model_copy(update={"content": content})
+
+
+def _text_chars(result) -> int:
+    return sum(len(getattr(c, "text", "")) for c in result.content if getattr(c, "type", None) == "text")
 
 
 async def check_tool_list(server: MCPServerStdio) -> list[str]:

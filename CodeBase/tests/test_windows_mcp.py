@@ -11,7 +11,10 @@ import pytest
 from mpagent.config import load_settings
 from mpagent.execute.windows_mcp import (
     ALLOWED_TOOLS,
+    MAX_RESULT_CHARS,
     check_tool_list,
+    clean_result,
+    clean_text,
     save_images,
     windows_mcp_server,
 )
@@ -47,3 +50,41 @@ def test_smoke_real_server_lists_13_tools_and_screenshots(tmp_path):
     names, saved = asyncio.run(smoke())
     assert names == sorted(ALLOWED_TOOLS)
     assert len(saved) == 1 and saved[0].stat().st_size > 1000
+
+
+# A real Windows-MCP PowerShell result from run 20261013-131217 (progress noise + an error, as CLIXML)
+CLIXML_RESULT = (
+    'Response: #< CLIXML\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">'
+    '<Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T></TN><MS>'
+    '<PR N="Record"><AV>Preparing modules for first use.</AV></PR></MS></Obj>'
+    '<S S="Error">Select-Object : Exception getting "ExitCode": "Process must exit before requested '
+    'information can be determined."_x000D__x000A_</S><S S="Error">At line:1 char:432_x000D__x000A_</S>'
+    '</Objs>\nStatus Code: 1'
+)
+
+
+def test_clixml_is_replaced_by_its_error_lines():
+    text = clean_text(CLIXML_RESULT)
+    assert "CLIXML" not in text and "Preparing modules" not in text
+    assert '(PowerShell error output)\nSelect-Object : Exception getting "ExitCode"' in text
+    assert text.rstrip().endswith("Status Code: 1")
+
+
+def test_progress_only_clixml_becomes_no_output():
+    progress_only = CLIXML_RESULT.split("<S S=")[0] + "</Objs>\nStatus Code: 0"
+    assert clean_text(progress_only) == "Response: (no output)\n\nStatus Code: 0"
+
+
+def test_long_results_are_truncated_with_a_hint():
+    text = clean_text("x" * (MAX_RESULT_CHARS + 5_000))
+    assert len(text) < MAX_RESULT_CHARS + 300 and "truncated: 5,000 more characters" in text
+
+
+def test_clean_result_keeps_images_and_returns_a_copy():
+    from mcp.types import CallToolResult, ImageContent, TextContent
+
+    original = CallToolResult(content=[TextContent(type="text", text=CLIXML_RESULT),
+                                       ImageContent(type="image", data="AAAA", mimeType="image/png")])
+    cleaned = clean_result(original)
+    assert "CLIXML" in original.content[0].text  # the original (traced) result is untouched
+    assert "CLIXML" not in cleaned.content[0].text and cleaned.content[1] == original.content[1]

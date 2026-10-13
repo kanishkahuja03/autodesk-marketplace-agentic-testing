@@ -101,4 +101,7 @@ def run_preflight(run_dir: Path, facts: InstallerFacts, settings: Settings) -> N
     obs = check_env000(run_dir, facts)
     log.info("  ENV-000: %s", obs.notes)
     if obs.observed[0].value:
-        raise PreflightError(f"app already installed ({obs.notes}) — uninstall it manually, then run again")
+        code = facts.properties.get("ProductCode")
+        how = (f"in an administrator prompt run: msiexec /x {code} /qn" if facts.installer_type == "msi" and code
+               else "use Control Panel > Programs and Features")
+        raise PreflightError(f"app already installed ({obs.notes}) — uninstall it first ({how}), then run again")

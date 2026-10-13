@@ -16,6 +16,8 @@ PLACEHOLDER = re.compile(r"\$\{([A-Za-z0-9_]+)\}")
 USER_PROFILE_PATH = re.compile(r"[A-Za-z]:\\Users\\", re.IGNORECASE)
 NEEDS_VALUE = {Check.EQUALS, Check.NOT_EQUALS, Check.CONTAINS, Check.MATCHES}
 HOST_NONE, HOST_UNKNOWN = "none", "unknown"
+# Keys about the app's own installation; an ENV test using them checks the wrong thing (run 20261013-145150)
+APP_INSTALL_KEYS = {"install_exit_code", "uninstall_exit_code", "uninstall_entry_exists", "preinstalled_entry_exists"}
 
 
 def normalise(text: str) -> str:
@@ -65,6 +67,10 @@ def check_plan(plan: TestPlan, sources: list[Source], host_ids: Iterable[str]) -
         else:
             check_citation(f"{t.id}.source", t.source)
         _check_expectations(t, errors)
+        if t.category is Category.ENV:
+            for key in sorted(set(t.observe) & APP_INSTALL_KEYS):
+                errors.append(f"{t.id}: ENV tests check the machine/host, not the app's installation; "
+                              f"'{key}' belongs in INST/UNIN tests (use e.g. host_installed, host_version)")
         for text in texts_of(t):
             if USER_PROFILE_PATH.search(text):
                 errors.append(f"{t.id}: hard-coded user profile path {text!r}; use a placeholder or %AppData%")

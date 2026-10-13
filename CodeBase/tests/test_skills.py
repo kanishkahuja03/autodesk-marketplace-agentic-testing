@@ -29,3 +29,14 @@ def test_required_coverage_keys_are_in_test_design_skill():
     # The self-check (ARCHITECTURE.md D24) looks for exactly these keys
     text = (SKILLS / "test-design" / "SKILL.md").read_text(encoding="utf-8")
     assert "`install_exit_code`" in text and "`uninstall_entry_exists`" in text
+
+
+def test_uninstall_is_silent_and_files_are_read_only():
+    # The Programs and Features UI recipe caused wrong-row selections (runs 20261013-132121, -145150);
+    # uninstall is now silent like the install, and Agent 2 never writes files.
+    text = (SKILLS / "execute" / "windows-installer.md").read_text(encoding="utf-8")
+    assert "'/x','<ProductCode>'" in text and "uninstall_exit_code" in text
+    assert "appwiz.cpl" not in text and "Search Box" not in text
+    assert "you never write, copy, move or delete files" in text
+    design = (SKILLS / "test-design" / "SKILL.md").read_text(encoding="utf-8")
+    assert "Silent uninstall finishes" in design and "Control Panel" not in design

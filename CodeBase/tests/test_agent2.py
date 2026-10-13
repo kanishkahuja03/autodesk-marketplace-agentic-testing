@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import os
 import subprocess
 from dataclasses import replace
 from types import SimpleNamespace
@@ -123,3 +124,29 @@ def test_cleanup_skips_non_msi(tmp_path, monkeypatch):
     monkeypatch.setattr(cleanup, "find_uninstall_entry", lambda code, name: "HKLM:\\X")
     monkeypatch.setattr(cleanup.subprocess, "run", lambda *a, **k: pytest.fail("msiexec must not run"))
     cleanup.cleanup(tmp_path, FACTS.model_copy(update={"installer_type": "exe"}))
+
+
+def test_executed_observation_is_not_replaced_and_repeats_are_ignored(tmp_path):
+    # run 20261013-125224: ENV-001's good result was overwritten by later "not executed" records
+    obs = agent2.ObservationRecorder(tmp_path, plan(), CallRecorder(tmp_path, Trace(tmp_path)), Trace(tmp_path))
+    good = [KeyValue(key="install_exit_code", value=0)]
+
+    assert obs.record("INST-001", False, [KeyValue(key="install_exit_code", value=None)], [], "failed") == \
+        "Recorded INST-001."
+    assert obs.record("INST-001", True, good, [], None) == "Recorded INST-001."  # not executed -> executed is fine
+    assert "already recorded as executed" in obs.record("INST-001", False, [], [], "gave up")
+    assert obs.record("INST-001", True, good, [], "again").startswith("Already recorded")
+    saved = load_observations(tmp_path)
+    assert len(saved) == 1 and saved[0].executed and saved[0].observed == good
+
+
+def test_input_names_the_app_and_real_folders(tmp_path):
+    # run 20261013-132121: Agent 2 guessed C:\Users\Admin and selected the wrong program
+    plugins = r"%AppData%\Autodesk\ApplicationPlugins"
+    facts = FACTS.model_copy(update={"install_roots": [plugins]})
+    prompt = agent2.build_input(plan(), tmp_path, tmp_path / "x.msi", None, facts)
+    assert "DisplayName (name in Programs and Features): App" in prompt
+    wow = r"HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" + "\\"
+    assert wow + FACTS.properties["ProductCode"] in prompt
+    assert f"%APPDATA% = {os.environ['APPDATA']}" in prompt
+    assert os.path.expandvars(plugins) in prompt

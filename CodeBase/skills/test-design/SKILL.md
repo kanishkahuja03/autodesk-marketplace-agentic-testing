@@ -31,7 +31,7 @@ Test **the app**, its installation, registration and removal. Never test the hos
 |---|---|
 | **ENV** | The host is installed and its version is one the app supports; folders the app needs exist; OS facts the docs require (e.g. 64-bit). Skip host tests when `host_id` is `none`. |
 | **INST** | Silent install finishes; a Programs and Features (Uninstall) entry appears with the expected name and version; the expected files and folders exist; the installer's signature is valid and the signer matches the claimed publisher. |
-| **UNIN** | The app is uninstalled **the way a user does it: through Control Panel → Programs and Features** (write the step as that intent, never as a silent/msiexec uninstall); the Uninstall entry is removed; the installed files and folders are gone. A UI uninstall gives **no exit code**: observe what Agent 2 can see instead (e.g. `uninstall_completed` true/false, the entry, the files), never `uninstall_exit_code`. |
+| **UNIN** | Silent uninstall finishes (observe `uninstall_exit_code`, expected `in` `["0", "3010"]`); the Uninstall entry is removed; the installed files and folders are gone. |
 
 **Required in every plan** (the self-check rejects the plan otherwise), with exactly these keys:
 1. an INST test that observes `install_exit_code`, expected `in` `["0", "3010"]`;
@@ -45,7 +45,12 @@ Test **the app**, its installation, registration and removal. Never test the hos
 - `source`: one citation `{doc, line, quote}`. The `quote` must be **copied exactly** from that source (a short phrase is best). Code checks it.
 - `preconditions`: IDs of tests that must PASS first. INST tests depend on `ENV-000`; tests that need the host depend on the host ENV test; UNIN tests depend on the install test.
 - `steps`: plain-language **intents** for Agent 2, not commands. Good: "Install ${INSTALLER_PATH} silently with a verbose log". Bad: a PowerShell script.
-- `observe`: snake_case keys Agent 2 must report, e.g. `install_exit_code`, `uninstall_entry_exists`, `display_version`, `bundle_dir_exists`, `signature_status`, `signer_subject`.
+- `observe`: snake_case keys Agent 2 must report. Pick keys that describe **what the test is about**:
+  - ENV: `host_installed`, `host_version`, `host_install_dir_exists`, `os_64bit`, `<folder>_exists`;
+  - INST: `install_exit_code`, `uninstall_entry_exists`, `display_version`, `bundle_dir_exists`, `signature_status`, `signer_subject`;
+  - UNIN: `uninstall_exit_code`, `uninstall_entry_exists`, `<file or folder>_exists`.
+
+  The keys `install_exit_code`, `uninstall_exit_code`, `uninstall_entry_exists` and `preinstalled_entry_exists` describe the **app's** installation, so they are **not allowed in ENV tests** (the self-check rejects them). A host check observes the host, e.g. `host_installed`.
 - `expected`: one or more checks, each on a key from `observe`:
 
 | check | use for | fields |

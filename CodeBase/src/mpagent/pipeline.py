@@ -94,7 +94,7 @@ def _execution_side(design: Design, settings: Settings) -> RunResults | None:
     log.info("Agent 2 test execution: start")
     run_results: RunResults | None = None
     try:
-        run_agent2(design.plan, design.run_dir, design.installer_path, settings)
+        run_agent2(design.plan, design.run_dir, design.installer_path, settings, design.facts)
         log.info("Agent 2 test execution: done")
     except Agent2Error as e:
         raise PipelineStopped(f"Agent 2 didn't finish: {e}") from e

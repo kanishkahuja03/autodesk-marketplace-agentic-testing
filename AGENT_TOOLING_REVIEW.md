@@ -2,6 +2,7 @@
 
 **Date:** 2026-10-12
 **Status:** For team review. Mark each item ✅ keep / ❌ drop / ✏️ change in the **Decision** column. Claude finalizes the implementation list after the review.
+**Update 2026-10-13 (after live runs):** the points in Part C are now settled in code; see "Outcome" under each point and [`ARCHITECTURE.md`](ARCHITECTURE.md) D26–D39. In Part B, the "UNIN (UI path)" uses of App, Snapshot, Click, Type and Scroll no longer apply (the uninstall is silent); those tools stay allowed for the planned host/plug-in screenshot test.
 
 **Already decided (not up for review here):**
 - Generic architecture; the first host is AutoCAD Plant 3D 2027.
@@ -87,10 +88,15 @@ Source: [Windows-MCP README](https://github.com/CursorTouch/Windows-MCP) (MIT, `
 ## Part C: Points for the team to decide
 
 1. **PowerShell (W1):** allow it fully with rules (recommended for the demo), allow it for INST/UNIN only, or replace it with a small function tool of our own that only runs `msiexec` and `Get-AuthenticodeSignature`. The last option is about 30 lines of code and removes the biggest risk.
+   **Outcome:** allowed with an allow-list of command starts and forbidden constructs (D32), install only once and a repeat limit (D36), results cleaned of CLIXML and capped (D37).
 2. **Registry and FileSystem writes (W2, W3):** accept "read only by instruction" for the demo, or add an SDK guardrail that rejects tool calls whose arguments contain `delete` or `write`.
+   **Outcome:** code guardrail: Registry read/list only, FileSystem read-only, large whole-file reads rejected (D33). Agent 2 had overwritten `install.log` before this.
 3. **Uninstall path for the demo:** both paths (silent `msiexec /x` + the Control Panel UI), or only `msiexec` if the UAC prompt blocks the UI path.
+   **Outcome:** silent `msiexec /x` only (D27). The UI path selected the wrong program in a live run.
 4. **Placeholder resolution:** with one session, Agent 2 resolves `${HOST_EXE}`, `${PLUGIN_DIRS}` and similar during ENV and reuses them. OK, or should code resolve them before Agent 2 starts?
+   **Outcome:** Agent 2 still resolves placeholders, but code now gives it the app facts and the machine's real folders (D38).
 5. **Model:** which OpenAI model your enterprise org has for tool calling (set in `.env`, not hard-coded).
+   **Outcome:** `gpt-4o-mini` for now (`OPENAI_MODEL`); a stronger model would make UI steps more reliable.
 
 ---
 

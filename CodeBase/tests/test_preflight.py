@@ -1,5 +1,6 @@
 """Tests for the preflight (ARCHITECTURE.md D20, D23). Run with: uv run pytest"""
 
+import re
 import winreg
 
 import pytest
@@ -52,7 +53,8 @@ def test_already_installed_stops(tmp_path, monkeypatch):
     monkeypatch.setattr(preflight, "is_elevated", lambda: True)
     monkeypatch.setattr(preflight.asyncio, "run", lambda coro: (coro.close(), ["13 tools"])[1])
     monkeypatch.setattr(preflight, "find_uninstall_entry", lambda code, name: r"HKLM:\...\Uninstall\{X}")
-    with pytest.raises(preflight.PreflightError, match="app already installed"):
+    uninstall = re.escape(f"msiexec /x {FACTS.properties['ProductCode']} /qn")
+    with pytest.raises(preflight.PreflightError, match=f"app already installed .*{uninstall}"):
         preflight.run_preflight(tmp_path, FACTS, load_settings())
     assert load_observations(tmp_path)[0].observed[0].value is True  # ENV-000 still recorded
 

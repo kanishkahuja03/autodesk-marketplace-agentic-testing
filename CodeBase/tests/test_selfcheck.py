@@ -97,3 +97,17 @@ def test_host_rules():
 def test_user_profile_path_is_rejected():
     data = changed(lambda d: d["testcases"][1]["steps"].append(r"Look in C:\Users\kanishk\AppData\Roaming"))
     assert any("hard-coded user profile path" in e for e in errors_for(data))
+
+
+def test_env_tests_may_not_observe_app_install_keys():
+    # run 20261013-145150: a "host is installed" ENV test observed uninstall_entry_exists and failed falsely
+    env = {"id": "ENV-001", "origin": "agent", "category": "ENV", "title": "Host installed",
+           "source": {"doc": "D1", "line": 1, "quote": "AutoCAD® Plant 3D™ plugin"}, "preconditions": [],
+           "steps": ["Check the host"], "observe": ["uninstall_entry_exists"],
+           "expected": [{"key": "uninstall_entry_exists", "check": "exists", "value": None, "values": None}],
+           "priority": "P1"}
+    errs = errors_for(changed(lambda d: d["testcases"].append(env)))
+    assert any("ENV-001: ENV tests check the machine/host" in e for e in errs)
+    env["observe"] = ["host_installed"]
+    env["expected"][0]["key"] = "host_installed"
+    assert errors_for(changed(lambda d: d["testcases"].append(env))) == []

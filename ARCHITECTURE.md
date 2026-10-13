@@ -1,6 +1,6 @@
 # Architecture V2: Generic Plug-in / App Validation Agents
 
-> **Status:** v2.1, 2026-10-12. This is the build plan for the product. v2.1 adds the grill-me decisions D16–D35: one F5 run, preflight, cleanup, logging, guardrails, `record_observation`.
+> **Status:** v2.2, 2026-10-13. This is the build plan for the product. v2.1 added the grill-me decisions D16–D35 (one F5 run, preflight, cleanup, logging, guardrails, `record_observation`). **v2.2** records what the live runs of 2026-10-12/13 taught (D24, D26, D27, D30, D32, D33 updated; D36–D39 new): silent uninstall instead of the UI, read-only FileSystem, per-run guardrail rules, cleaned and capped tool results, app facts in Agent 2's input. First clean run: `20261013-152426` (3 PASS).
 > **Supersedes:** [`ARCHITECTURE_old1.md`](ARCHITECTURE_old1.md) (v0.3). Where they disagree, **this document wins**, including over what is already in `CodeBase/`.
 > **Inputs to this version:** [`ARCHITECTURE_COMPARISON.md`](ARCHITECTURE_COMPARISON.md) (ours vs `AppStore automation/`), [`AGENT_TOOLING_REVIEW.md`](AGENT_TOOLING_REVIEW.md) (tool lists, one by one), [`DESKTOP_UI_AUTOMATION_RESEARCH.md`](DESKTOP_UI_AUTOMATION_RESEARCH.md). Decision index: [`ADR.md`](ADR.md).
 
@@ -54,18 +54,27 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 | D21 | Windows-MCP install | **Installed once beforehand** (pinned version, setup step in README, next to `uv sync`). F5 only starts it. |
 | D22 | Plug-in already installed | INST and UNIN are **BLOCKED** and nothing is installed. Cleanup is manual. |
 | D23 | ENV-000 | A **built-in test executed by code** in the preflight (registry lookup by ProductCode, or DisplayName as a fallback, from `installer_facts`). It's recorded in the results like any test, with `origin: built-in`. |
-| D24 | Basic test coverage | **Agent 1 writes all other tests.** The **self-check enforces** that there's at least: one INST test observing the install exit code, one INST test observing that the Uninstall entry exists, and one UNIN test observing that the entry is gone. |
+| D24 | Basic test coverage | **Agent 1 writes all other tests.** The **self-check enforces** that there's at least: one INST test observing the install exit code, one INST test observing that the Uninstall entry exists, and one UNIN test observing that the entry is gone. It also **rejects ENV tests that observe the app's installation keys** (`install_exit_code`, `uninstall_exit_code`, `uninstall_entry_exists`, `preinstalled_entry_exists`); ENV tests observe the machine or host (e.g. `host_installed`, `host_version`). *(Run 20261013-145150: a host test observed `uninstall_entry_exists` and failed falsely.)* |
 | D25 | Gating | The only hard stops are the preflight checks (incl. ENV-000). All other dependencies are **per-test `preconditions`** written by Agent 1, applied **afterwards** by the verdict engine (→ BLOCKED). Agent 2 simply runs every test. |
-| D26 | Install path | **Silent** `msiexec /i <msi> /qn /l*v <run>\evidence\install.log`. There's no UI install and no automatic UI retry. Code **creates `evidence\` before Agent 2 starts** (otherwise msiexec can't open its log and aborts at once). Agent 2 runs the install **once** and takes `install_exit_code` from the log's `success or error status: N` line (via `Select-String`), never from PowerShell's own status code; no log or no result line → `null`. *(Lessons from run 20261012-191028.)* |
-| D27 | Uninstall path | **UI uninstall** (Programs and Features / Settings → Apps) through Windows-MCP. `msiexec /x` is used only by the cleanup step (D28). |
+| D26 | Install path | **Silent** `Start-Process -FilePath msiexec.exe -ArgumentList '/i',<msi>,'/qn','/norestart','/l*v',<run>\evidence\install.log -Wait`. There's no UI install and no automatic UI retry. Code **creates `evidence\` before Agent 2 starts** (otherwise msiexec can't open its log and aborts at once). Agent 2 runs the install **once** (enforced by D32) and takes `install_exit_code` from the log's `success or error status: N` line (via `Select-String`), never from PowerShell's own status code; no log or no result line → `null`. `-PassThru \| Select-Object -ExpandProperty ExitCode` is not used: inside Windows-MCP it always fails ("Process must exit before requested information can be determined"). *(Runs 20261012-191028, 20261013-131217.)* |
+| D27 | Uninstall path | **Silent**, like the install: Agent 2 runs `msiexec /x <ProductCode> /qn /norestart /l*v <run>\evidence\uninstall.log` once, takes `uninstall_exit_code` from the log's `success or error status: N` line, then re-checks the Uninstall entry and the files. *(Changed 2026-10-13: the Programs and Features UI path made gpt-4o-mini scroll a 58-program list and select the wrong program — run 20261013-132121 had GlobalProtect selected with Uninstall clicked. The UI is kept for the host/plug-in screenshot test planned next.)* |
 | D28 | Cleanup (code, `finally`) | Always runs at the end. If the ProductCode is known **and** the Uninstall entry still exists **and** UNIN didn't complete → `msiexec /x {ProductCode} /qn`, logged as `CLEANUP`. It **never changes a verdict**. Non-MSI → logs "manual cleanup needed". |
 | D29 | Time limits | Agent 2: **150 turns**, **120 s per tool call**, **20 min total** (all in `.env`). If a limit is hit → the run is cancelled, missing tests become ERROR, cleanup runs, and it's logged. |
-| D30 | Observations | Agent 2 reports **per test, as it goes**, through the local tool **`record_observation(test_id, observed, evidence, notes)`**. It appends to `observations.json` and never touches the machine. It **rejects evidence files that don't exist** in the run folder (Agent 2 must then record again with real files and only values it actually saw). The final agent output is only a short "done" plus the resolved env values. |
+| D30 | Observations | Agent 2 reports **per test, as it goes**, through the local tool **`record_observation(test_id, observed, evidence, notes)`**. It appends to `observations.json` and never touches the machine. It **rejects evidence files that don't exist** in the run folder (Agent 2 must then record again with real files and only values it actually saw). An observation recorded with `executed: true` **can't be replaced** by a later `executed: false` one, and an identical repeat is answered "already recorded" instead of being saved again. The final agent output is only a short "done" plus the resolved env values. *(Run 20261013-125224: good results were overwritten by later failed attempts.)* |
 | D31 | Screenshots | Our trace hook **saves every Windows-MCP screenshot** to `evidence/`, and code **attaches every screenshot taken since the previous `record_observation` call to the next one** automatically. Agent 2 lists only other evidence files (e.g. `evidence/install.log`). *Verified on Windows-MCP 0.8.6: `Screenshot` returns the PNG inline as base64 (plus a text block with the cursor position and coordinate scale) and saves no file, so our code must save it (`execute/windows_mcp.py: save_images`).* |
-| D32 | PowerShell control | A code guardrail with an **allow-list of command starts**: `Start-Process -FilePath msiexec.exe` (with `-Wait -PassThru`; a bare `msiexec` call returns before the install finishes and gives no exit code), `Get-AuthenticodeSignature`, `Get-ItemProperty`, `Get-ChildItem`, `Test-Path`, `Select-String` (read-only search, e.g. the result line of `install.log`), `Get-CimInstance Win32_OperatingSystem`, and the admin check. The command may not contain `;`, `&`, `{ }` (except GUIDs), `$( )`, backticks, redirection or line breaks, and pipes may only go into output-shaping commands (`Select-Object`, `Format-List`, `Format-Table`, `Sort-Object`, `Measure-Object`, `Out-String`, `ConvertTo-Json`). Everything else is **rejected and logged**. |
-| D33 | Registry / FileSystem control | Code guardrail: Registry **read/list only**. FileSystem can read anywhere, but **write/copy/move only inside the run folder** and **never delete**. Rejections are logged and the agent is told why. |
+| D32 | PowerShell control | A code guardrail with an **allow-list of command starts**: `Start-Process -FilePath msiexec.exe` (with `-Wait`; a bare `msiexec` call returns before the install finishes), `Get-AuthenticodeSignature`, `Get-ItemProperty`, `Get-ChildItem`, `Test-Path`, `Select-String` (read-only search, e.g. the result line of a msiexec log), `Get-CimInstance Win32_OperatingSystem`, and the admin check. The command may not contain `;`, `\|\|`, `{ }` (except GUIDs), `$( )`, backticks, redirection or line breaks, nor `&` **outside quotes** (inside quotes it's text, e.g. `'P&ID Connector'`). Pipes may only go into output-shaping commands (`Select-Object`, `Format-List`, `Format-Table`, `Sort-Object`, `Measure-Object`, `Out-String`, `ConvertTo-Json`). Everything else is **rejected and logged**. |
+| D33 | Registry / FileSystem control | Code guardrail: Registry **read/list only**. FileSystem is **read-only**: `read`, `list`, `search`, `info`; `write`, `copy`, `move` and `delete` are always rejected (Agent 2 reports through `record_observation`; evidence comes from the tools). A `read` without `limit` of a file over **50 KB** is rejected (use `Select-String` or `offset`/`limit`). Rejections are logged and the agent is told why. *(Run 20261013-145150: Agent 2 overwrote the real `install.log` with its own sentence; run 20261013-131217: a whole-file read of a 354 KB log overflowed the model's context.)* |
 | D34 | Model | **One `OPENAI_MODEL`** for both agents (the strongest model available to the org). |
 | D35 | Run result | The final `run.log` line is `COMPLETED: n PASS, n FAIL, n BLOCKED, n ERROR — report: …` or `STOPPED: <reason>`. **Exit code:** 0 = completed (even with FAIL tests), 1 = stopped, 2 = unexpected crash. |
+
+### 2.3 Lessons from live runs (D36–D39, 2026-10-13)
+
+| # | Topic | Decision |
+|---|---|---|
+| D36 | Per-run guardrail rules | On top of D32/D33, a per-run `CallPolicy`: **a second `msiexec /i` is rejected** ("install only once, read the log"), and the **same tool call with the same arguments more than 3 times is rejected** (Snapshot, Screenshot, Wait and WaitFor are exempt). *(Run 20261013-125224: the installer ran twice and one FileSystem call was repeated 19 times.)* |
+| D37 | Tool results sent to the model | Code cleans every Windows-MCP result before the model sees it: PowerShell **CLIXML progress noise is removed** and its error lines are decoded ("(PowerShell error output)"), and any text **over 20,000 characters is cut off** with a hint to use `Select-String` or `offset`/`limit`. The original result still goes to `trace.jsonl`. |
+| D38 | App facts for Agent 2 | Code adds an **"App under test"** block to Agent 2's input: DisplayName, Publisher, Version, ProductCode, the three Uninstall registry paths with the ProductCode, the install roots expanded to real paths, and the machine's real folders (`%APPDATA%`, `%LOCALAPPDATA%`, `%USERPROFILE%`, `%ProgramFiles%`, …). Execution side only, so Agent 1 stays blind. *(Run 20261013-132121 guessed `C:\Users\Admin`, `C:\Users\User`.)* |
+| D39 | Stopping a run | **Ctrl+C in the console** interrupts Agent 2, and the `finally` steps (cleanup, verdicts, report) still run; the log then ends without a COMPLETED/STOPPED line. The VS **Stop** button or closing the console kills the process, so cleanup can't run; the next run then stops at ENV-000 and prints the exact `msiexec /x {ProductCode} /qn` command to remove the leftover. |
 
 **Agent 2 resolves placeholders** (`${PLUGIN_DIR}` etc.) during its ENV tests and returns them in its final output.
 
@@ -93,8 +102,9 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
         ▼
    ┌──── AGENT 2: Test Executor (OpenAI + Windows-MCP) ──┐
    │ skills: windows-installer + evidence + hosts/<id>   │
-   │ one session: ENV → INST (silent) → UNIN (UI)        │──► record_observation → observations.json
-   │ guardrails: PowerShell allow-list, read-only        │
+   │ one session: ENV → INST (silent) → UNIN (silent)    │──► record_observation → observations.json
+   │ guardrails: PowerShell allow-list, read-only,       │
+   │   install once, repeat limit; results cleaned/capped│
    │ limits: 150 turns · 120 s/tool · 20 min             │
    └───────────────┬─────────────────────────────────────┘
                    │ MCP stdio (13 allowed tools)
@@ -165,28 +175,28 @@ Runs right after Agent 1, before Agent 2. Each check logs one line in `run.log`.
 |---|---|
 | Agent | `agents.Agent(name="test-executor", instructions=<skills>, mcp_servers=[windows_mcp], tools=[record_observation], model=$OPENAI_MODEL)` |
 | MCP server | `MCPServerStdio` launching the **pre-installed** Windows-MCP **0.8.6** (`windows-mcp serve --transport stdio --tools "<allow-list>"`, built in `execute/windows_mcp.py`), plus `tool_filter=create_static_tool_filter(allowed_tool_names=[…])`. Per-tool timeout: `AGENT2_TOOL_TIMEOUT_S` (120). |
-| Input message | The whole `testcases.yaml` (incl. ENV-000's result), the run folder path (where to save evidence), and the installer path |
+| Input message | The whole `testcases.yaml` (incl. ENV-000's result), the run folder path (where msiexec writes its logs), the installer path, and the **"App under test" block** (D38) |
 | Instructions | `skills/execute/windows-installer.md` + `skills/execute/evidence.md` + `skills/hosts/<host_id>.md` |
-| Order | ENV (and resolve every `required_env` placeholder) → INST (**silent msiexec**, D26) → UNIN (**UI uninstall**, D27). Run every test; don't skip because of a precondition (D25). |
+| Order | ENV (and resolve every `required_env` placeholder) → INST (**silent msiexec /i**, D26) → UNIN (**silent msiexec /x**, D27). Run every test; don't skip because of a precondition (D25). |
 | Reporting | Call **`record_observation`** right after each test (D30). The final output is only `{ done: true, env: {…} }`. |
 | Limits | `max_turns` 150; total wall-clock limit 20 min (`AGENT2_MAX_TURNS`, `AGENT2_TIMEOUT_MIN`) (D29) |
 
 ### `record_observation` (local function tool, new)
-`record_observation(test_id, executed, observed: [{key, value}], evidence: [paths], notes)` checks that `test_id` exists in the plan (ENV-000 is refused: code records it) and that every evidence path is an existing file inside the run folder. It then adds the screenshots taken since the previous call and appends to `observations.json`, overwriting an earlier entry for the same test. It has no access to the machine.
+`record_observation(test_id, executed, observed: [{key, value}], evidence: [paths], notes)` checks that `test_id` exists in the plan (ENV-000 is refused: code records it) and that every evidence path is an existing file inside the run folder. It then adds the screenshots taken since the previous call and appends to `observations.json`, overwriting an earlier entry for the same test, except that an `executed: true` entry is never replaced by `executed: false`, and an identical repeat is not saved again (D30). It has no access to the machine.
 
 ### Windows-MCP tool allow-list (13)
 
 | Tool | Used for |
 |---|---|
-| **PowerShell** | `Start-Process -FilePath msiexec.exe -ArgumentList '/i',…,'/qn','/norestart','/l*v','<run>\evidence\install.log' -Wait -PassThru`, then `Select-String` on `install.log` for the real exit code (D26), `Get-AuthenticodeSignature`, OS version and admin check (allow-listed commands only, D32) |
-| **Registry** | Host detection; Programs & Features entry present or gone (both Uninstall keys, including WOW6432Node). Read only (D33). |
-| **FileSystem** | Required folders exist; installed files present; manifest readable; files gone after uninstall. Writes only in the run folder (D33). |
+| **PowerShell** | `Start-Process -FilePath msiexec.exe -ArgumentList '/i',…,'/l*v','<run>\evidence\install.log' -Wait` and the same with `'/x','<ProductCode>'` → `uninstall.log`; then `Select-String` on the log for the real exit code (D26, D27); `Get-AuthenticodeSignature`, OS version and admin check (allow-listed commands only, D32) |
+| **Registry** | Host detection; Programs & Features entry present or gone (all three Uninstall keys, including WOW6432Node). Read only (D33). |
+| **FileSystem** | Required folders exist; installed files present; manifest readable; files gone after uninstall. **Read-only** (D33). |
 | **Process** | Installer or host running; close a stuck installer |
-| **App** | Open *Programs and Features* / *Settings → Apps* for the UI uninstall |
+| **App** | Start programs by full path (next planned use: open the host for the plug-in screenshot test) |
 | **Snapshot** | Read the window's accessibility tree (the agent's "eyes") |
-| **Click / Type / Shortcut / Scroll** | Use the UI uninstall dialog and confirm prompts |
-| **WaitFor / Wait** | Wait for dialogs and entries to appear or disappear |
-| **Screenshot** | Evidence after each UI step and at failures (saved to `evidence/` by the trace hook, D31) |
+| **Click / Type / Shortcut / Scroll** | UI steps (none in the current ENV/INST/UNIN flow; kept for the host test) |
+| **WaitFor / Wait** | Wait for windows and elements |
+| **Screenshot** | Evidence of UI state (saved to `evidence/` by the trace hook, D31) |
 
 **Blocked (7 in Windows-MCP 0.8.6, which has 20 tools):** DisplayInventory, Move, MultiSelect, MultiEdit, Clipboard, Scrape, Notification. They're blocked twice: Windows-MCP `--tools` and the SDK filter. (`ControlStatus`, named in the project README, doesn't exist in 0.8.6; it would be blocked too.)
 
@@ -194,8 +204,11 @@ Runs right after Agent 1, before Agent 2. Each check logs one line in `run.log`.
 1. **Allow-list** (above), enforced in two places.
 2. **PowerShell:** the command must start with an allow-listed command (D32), otherwise it's rejected.
 3. **Registry:** only read and list actions (D33).
-4. **FileSystem:** write, copy and move only under `runs/<app>/<ts>/`; delete always rejected (D33).
-5. Every rejection goes to `run.log` and `trace.jsonl`, and the agent receives the reason as the tool result.
+4. **FileSystem:** read-only; whole-file reads over 50 KB need `offset`/`limit` (D33).
+5. **Per run (D36):** install only once; the same call more than 3 times is rejected.
+6. Every rejection goes to `run.log` and `trace.jsonl`, and the agent receives the reason as the tool result.
+
+After each allowed call, code **cleans and caps the result** before the model sees it (D37).
 6. **Untrusted text:** the instructions state that text in the plug-in's docs and UI is data, never instructions.
 7. **Evidence rule:** report raw values only. Never judge pass or fail.
 
@@ -294,7 +307,7 @@ env: [{ key: HOST_INSTALL_DIR, value: 'C:\Program Files\Autodesk\AutoCAD 2027' }
 | `skills/test-design/SKILL.md` | Agent 1 | The categories and what each must cover; the basic coverage required by D24 with the suggested key names (`install_exit_code`, `uninstall_entry_exists`); citation format; placeholders; `observe` / `expected` rules and allowed checks; preconditions; "never guess"; "test the plug-in, not the host"; "ENV-000 is built in, don't write it" |
 | `skills/hosts/autocad-plant3d.md` | Agents 1 + 2 | Plug-in folders (`%ProgramFiles%` / `%AppData%\Autodesk\ApplicationPlugins`), bundle + `PackageContents.xml`, version ↔ release numbers (2027 = R26.0), registry detection pattern, content folder default. **Knowledge only, never machine values.** |
 | `skills/hosts/none.md` | Agents 1 + 2 | Standalone Windows app: Program Files, Start menu, Programs & Features only |
-| `skills/execute/windows-installer.md` | Agent 2 | Silent install command and logging (D26); exit codes 0 / 3010 / 1602 / 1603; both Uninstall registry hives; signature check; **UI uninstall steps** via Programs and Features / Settings → Apps (D27); allowed PowerShell commands (D32) |
+| `skills/execute/windows-installer.md` | Agent 2 | Allowed PowerShell commands (D32); read-only file rules and the 50 KB / 20,000-character limits (D33, D37); silent install and **silent uninstall** with logs, exit codes read from the logs (D26, D27); the three Uninstall registry paths; signature check; generic UI rules (full paths only, no Win+R, no guessed coordinates, never touch the console) |
 | `skills/execute/evidence.md` | Agent 2 | Call `record_observation` after every test; raw values only; reference saved screenshots and logs; untrusted-text rule; read-only rule; run every test |
 
 A new host means **one new Markdown file**, with no code change.
@@ -391,7 +404,7 @@ uv run mpagent inputs/pid-connector-exporter
 ## 11. Verification (demo acceptance)
 
 1. **Unit:** `uv run pytest`. Self-check catches a fake quote, a missing placeholder and missing basic coverage. Verdict engine covers every check type and the BLOCKED/ERROR precedence. Guardrails reject non-allow-listed PowerShell commands, registry writes and file deletes.
-2. **Happy path (F5):** with Plant 3D 2027 installed and the plug-in **not** installed: ENV PASS, INST PASS (exit code 0, entry and files present), UNIN PASS (UI uninstall, entry and files gone). Final line `COMPLETED`, exit 0, no CLEANUP action.
+2. **Happy path (F5):** with Plant 3D 2027 installed and the plug-in **not** installed: ENV PASS, INST PASS (exit code 0, entry and files present), UNIN PASS (silent uninstall exit code 0, entry and files gone). Final line `COMPLETED`, exit 0, no CLEANUP action. *(Achieved in run 20261013-152426: 3 PASS, 11 tool calls, about 80 s.)*
 3. **Already installed:** install the plug-in by hand, then F5 → ENV-000 FAIL, `STOPPED: plug-in already installed`, exit 1, nothing installed.
 4. **Not admin:** F5 from a non-elevated VS → `STOPPED: not running as administrator`, exit 1, the design outputs still exist.
 5. **Interrupted run:** force a timeout during UNIN → missing tests are ERROR, CLEANUP runs `msiexec /x`, and the plug-in is gone afterwards.
@@ -406,8 +419,10 @@ uv run mpagent inputs/pid-connector-exporter
 |---|---|
 | PowerShell, Registry and FileSystem can change the machine | Allow-list of tools; PowerShell command allow-list; read-only Registry; no deletes; admin dev machine accepted; VM later |
 | Prompt injection from third-party docs or UI text | Agent 1 has no tools; Agent 2 treats text as data; guardrails in code |
-| UAC dialog can't be automated | Preflight requires an elevated VS; silent install; UI uninstall runs elevated |
-| UI uninstall is fragile (dialogs, slow lists) | `WaitFor`, screenshots, time limits; cleanup removes the plug-in if the UI path fails |
+| UAC dialog can't be automated | Preflight requires an elevated VS; silent install and uninstall |
+| UI steps are fragile, and a confused model can click the wrong item | Uninstall is silent (D27); UI is only for screenshot-type tests; generic UI rules in the skill; screenshots, time limits |
+| A weak model (gpt-4o-mini) loops, reorders tests or writes thin plans | Self-check (D24), per-run guardrail rules (D36), no-overwrite of observations (D30), app facts (D38); a stronger model if available |
+| Large tool output overflows the model's context | Results cleaned and capped (D37); large whole-file reads rejected (D33) |
 | Windows-MCP is a community project | Pinned version, installed beforehand; preflight checks its tool list |
 | LLM runs vary slightly | Verdicts by code; the plan is saved; a new plan each F5 is accepted (D16) |
 | Agent 2 skips a test in a long session | `record_observation` per test; missing observations → ERROR |
