@@ -1,0 +1,49 @@
+# {{ plan.app.name }}{% if plan.app.version %} {{ plan.app.version }}{% endif %}
+
+*Written by Agent 1 from the input documents and the installer facts. Nothing was run on the machine.*
+
+| | |
+|---|---|
+| Publisher | {{ plan.app.publisher or "-" }} |
+| Host | `{{ plan.app.host_id }}`{% if plan.app.host_versions %} ({{ plan.app.host_versions | join(", ") }}){% endif %} |
+| Installer | {{ plan.app.installer.file }} ({{ plan.app.installer.type }}) |
+| ProductCode | {{ plan.app.installer.product_code or "-" }} |
+| Claimed signer | {{ plan.app.installer.signer_claimed or "-" }} |
+
+## Purpose
+{{ plan.summary.purpose }}
+
+## Why this host
+{% for c in plan.app.host_evidence -%}
+- {{ c.doc }}{% if c.line %}:{{ c.line }}{% endif %}: "{{ c.quote }}"
+{% else -%}
+- (no evidence; host is `{{ plan.app.host_id }}`)
+{% endfor %}
+## Install footprint
+{% for item in plan.summary.install_footprint -%}
+- {{ item }}
+{% else -%}
+- (not stated)
+{% endfor %}
+## Commands and UI
+{% for item in plan.summary.commands_or_ui -%}
+- {{ item }}
+{% else -%}
+- (not stated)
+{% endfor %}
+## Open questions
+{% for q in plan.summary.open_questions -%}
+- {{ q }}
+{% else -%}
+- (none)
+{% endfor %}
+## Tests ({{ plan.testcases | length }})
+| ID | Category | Priority | Title | Source |
+|---|---|---|---|---|
+{% for t in plan.testcases -%}
+| {{ t.id }} | {{ t.category.value }} | {{ t.priority.value }} | {{ t.title }} | {% if t.source %}{{ t.source.doc }}: "{{ t.source.quote }}"{% else %}built-in{% endif %} |
+{% endfor %}
+## Sources
+{% for s in sources -%}
+- **{{ s.id }}**: {{ s.label }}
+{% endfor %}

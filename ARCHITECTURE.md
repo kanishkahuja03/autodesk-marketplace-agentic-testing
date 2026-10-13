@@ -61,8 +61,8 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 | D28 | Cleanup (code, `finally`) | Always runs at the end. If the ProductCode is known **and** the Uninstall entry still exists **and** UNIN didn't complete → `msiexec /x {ProductCode} /qn`, logged as `CLEANUP`. It **never changes a verdict**. Non-MSI → logs "manual cleanup needed". |
 | D29 | Time limits | Agent 2: **150 turns**, **120 s per tool call**, **20 min total** (all in `.env`). If a limit is hit → the run is cancelled, missing tests become ERROR, cleanup runs, and it's logged. |
 | D30 | Observations | Agent 2 reports **per test, as it goes**, through the local tool **`record_observation(test_id, observed, evidence, notes)`**. It appends to `observations.json` and never touches the machine. The final agent output is only a short "done" plus the resolved env values. |
-| D31 | Screenshots | Our trace hook **saves every Windows-MCP screenshot** to `evidence/`. Agent 2 references those files in `record_observation`. *Verified on Windows-MCP 0.8.6: `Screenshot` returns the PNG inline as base64 (plus a text block with the cursor position and coordinate scale) and saves no file, so our code must save it (`execute/windows_mcp.py: save_images`).* |
-| D32 | PowerShell control | A code guardrail with an **allow-list of command starts**: `msiexec`, `Get-AuthenticodeSignature`, `Get-ItemProperty`, `Get-ChildItem`, `Test-Path`, `Get-CimInstance Win32_OperatingSystem`, and the admin check. Everything else is **rejected and logged**. |
+| D31 | Screenshots | Our trace hook **saves every Windows-MCP screenshot** to `evidence/`, and code **attaches every screenshot taken since the previous `record_observation` call to the next one** automatically. Agent 2 lists only other evidence files (e.g. `evidence/install.log`). *Verified on Windows-MCP 0.8.6: `Screenshot` returns the PNG inline as base64 (plus a text block with the cursor position and coordinate scale) and saves no file, so our code must save it (`execute/windows_mcp.py: save_images`).* |
+| D32 | PowerShell control | A code guardrail with an **allow-list of command starts**: `Start-Process -FilePath msiexec.exe` (with `-Wait -PassThru`; a bare `msiexec` call returns before the install finishes and gives no exit code), `Get-AuthenticodeSignature`, `Get-ItemProperty`, `Get-ChildItem`, `Test-Path`, `Get-CimInstance Win32_OperatingSystem`, and the admin check. Everything else is **rejected and logged**. |
 | D33 | Registry / FileSystem control | Code guardrail: Registry **read/list only**. FileSystem can read anywhere, but **write/copy/move only inside the run folder** and **never delete**. Rejections are logged and the agent is told why. |
 | D34 | Model | **One `OPENAI_MODEL`** for both agents (the strongest model available to the org). |
 | D35 | Run result | The final `run.log` line is `COMPLETED: n PASS, n FAIL, n BLOCKED, n ERROR — report: …` or `STOPPED: <reason>`. **Exit code:** 0 = completed (even with FAIL tests), 1 = stopped, 2 = unexpected crash. |
@@ -178,7 +178,7 @@ Runs right after Agent 1, before Agent 2. Each check logs one line in `run.log`.
 
 | Tool | Used for |
 |---|---|
-| **PowerShell** | `msiexec /i … /qn /l*v <run>\evidence\install.log`, exit codes, `Get-AuthenticodeSignature`, OS version and admin check (allow-listed commands only, D32) |
+| **PowerShell** | `Start-Process -FilePath msiexec.exe -ArgumentList '/i',…,'/qn','/norestart','/l*v','<run>\evidence\install.log' -Wait -PassThru` (exit code), `Get-AuthenticodeSignature`, OS version and admin check (allow-listed commands only, D32) |
 | **Registry** | Host detection; Programs & Features entry present or gone (both Uninstall keys, including WOW6432Node). Read only (D33). |
 | **FileSystem** | Required folders exist; installed files present; manifest readable; files gone after uninstall. Writes only in the run folder (D33). |
 | **Process** | Installer or host running; close a stuck installer |
@@ -337,18 +337,22 @@ CodeBase/
 │  ├─ design/
 │  │  ├─ intake.py              # existing (keep)
 │  │  ├─ static_read.py, msi.py # existing (keep)
-│  │  ├─ agent1.py              # NEW: Agent 1 + retry + writers + ENV-000 injection
-│  │  └─ selfcheck.py           # NEW
+│  │  ├─ evidence.py            # BUILT: evidence pack (D*, I*, F1 = installer facts as key = value lines)
+│  │  ├─ agent1.py              # BUILT: Agent 1 + retry + writers + ENV-000 injection
+│  │  ├─ selfcheck.py           # BUILT
+│  │  └─ templates/             # BUILT: understanding.md.j2
 │  └─ execute/
-│     ├─ windows_mcp.py         # BUILT: pinned version, 13-tool allow-list, server factory, tool-list check, save_images
-│     ├─ preflight.py           # NEW: admin, Windows-MCP tool list, ENV-000
-│     ├─ agent2.py              # NEW: Agent 2 + Windows-MCP + record_observation
-│     ├─ guardrails.py          # NEW: PowerShell allow-list, Registry/FileSystem rules
+│     ├─ windows_mcp.py         # BUILT: pinned version, 13-tool allow-list, server factory, tool-list check, save_images,
+│     │                         #        RecordingMCPServer + CallRecorder (traces every MCP call, saves screenshots)
+│     ├─ preflight.py           # BUILT: admin, Windows-MCP tool list, ENV-000
+│     ├─ observations.py        # BUILT: observations.json (shared by preflight and record_observation)
+│     ├─ agent2.py              # BUILT: Agent 2 + Windows-MCP + record_observation + limits
+│     ├─ guardrails.py          # BUILT: PowerShell allow-list, Registry/FileSystem/Process rules
 │     ├─ verdict.py             # NEW
-│     ├─ cleanup.py             # NEW
+│     ├─ cleanup.py             # BUILT: msiexec /x if the app is still installed at the end
 │     └─ report.py              # NEW (+ templates/report.html.j2)
 ├─ skills/                      # NEW: Markdown skills (§7)
-└─ tests/                       # + test_selfcheck.py, test_verdict.py, test_guardrails.py, test_preflight.py (test_pipeline.py, test_windows_mcp.py built)
+└─ tests/                       # + test_verdict.py (built: test_pipeline, test_windows_mcp, test_models, test_skills, test_selfcheck, test_agent1, test_guardrails, test_preflight)
 ```
 
 Nothing in `design/` imports from `execute/`. `pipeline.py` is the only module that uses both.

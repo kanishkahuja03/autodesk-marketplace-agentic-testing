@@ -26,7 +26,7 @@ uv run mpagent inputs/pid-connector-exporter
 uv run pytest                                  # unit tests
 ```
 Each run writes `run.log`. Its last line is `COMPLETED: …` (exit 0), `STOPPED: …` (exit 1) or `CRASHED: …` (exit 2).
-Built so far: S0 intake and S1 installer static read.
+Built so far: S0 intake, S1 installer static read and Agent 1 (writes `testcases.yaml` and `understanding.md`; needs `OPENAI_API_KEY` and `OPENAI_MODEL` in `.env`).
 
 ## Visual Studio 2026
 1. Visual Studio Installer → Visual Studio Community 2026 → **Modify** → tick **Python development** → Modify.
@@ -41,7 +41,8 @@ src/mpagent/
   pipeline.py       runs every step in order, writes the final status line
   config.py         settings from .env
   runlog.py         run.log (+ console) and trace.jsonl
-  design/           S0 intake, S1 installer static read
+  design/           S0 intake, S1 installer static read, Agent 1 (evidence pack, self-check, writers)
+skills/             Markdown instructions loaded into the agents
   execute/          execution side (so far: windows_mcp.py, the Windows-MCP connection)
 inputs/             one folder per app (see inputs/README.md)
 .env                OpenAI settings (private; template: .env.example)

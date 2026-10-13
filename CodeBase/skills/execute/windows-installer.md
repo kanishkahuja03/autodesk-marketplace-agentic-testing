@@ -39,9 +39,11 @@ FileSystem `mode="info"` or `"list"` (or `Test-Path`). Expand `%AppData%` etc. t
 
 ## 5. Signature
 ```powershell
-Get-AuthenticodeSignature -FilePath "<INSTALLER_PATH>" | Select-Object Status, @{n='Signer';e={$_.SignerCertificate.Subject}}
+Get-AuthenticodeSignature -FilePath "<INSTALLER_PATH>" | Format-List Status, StatusMessage, SignerCertificate
 ```
-Report `signature_status` (e.g. `Valid`, `NotSigned`, `HashMismatch`) and `signer_subject` (the full subject string).
+Report `signature_status` (e.g. `Valid`, `NotSigned`, `HashMismatch`) and `signer_subject` (the `[Subject]` line of the certificate, e.g. `CN=…, O=…`).
+
+The guardrail rejects `;`, `{ }` (except GUIDs), `$( )`, `&`, redirection and line breaks, and allows pipes only into `Select-Object`, `Format-List`, `Format-Table`, `Sort-Object`, `Measure-Object`, `Out-String` or `ConvertTo-Json`. Keep commands to one line.
 
 ## 6. Uninstall through the Windows UI (UNIN)
 The demo uninstalls **the way a user does**, through Control Panel → Programs and Features:

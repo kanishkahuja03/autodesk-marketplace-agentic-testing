@@ -52,6 +52,7 @@
     <Folder Include="src\" />
     <Folder Include="src\mpagent\" />
     <Folder Include="src\mpagent\design\" />
+    <Folder Include="src\mpagent\execute\" />
     <Folder Include="tests\" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />

@@ -11,6 +11,7 @@ from pathlib import Path
 from agents.mcp import MCPServerStdio, create_static_tool_filter
 
 from mpagent.config import Settings
+from mpagent.runlog import log
 
 # Version installed with `uv tool install windows-mcp==0.8.6` (README setup step).
 PINNED_VERSION = "0.8.6"
@@ -35,15 +36,60 @@ def find_command(settings: Settings) -> str:
     return path
 
 
-def windows_mcp_server(settings: Settings) -> MCPServerStdio:
-    """An (unstarted) MCP connection; use it as `async with windows_mcp_server(s) as server:`."""
-    return MCPServerStdio(
+def windows_mcp_server(settings: Settings, recorder: "CallRecorder | None" = None,
+                       guardrails: list | None = None) -> MCPServerStdio:
+    """An (unstarted) MCP connection; use it as `async with windows_mcp_server(s) as server:`.
+    With a recorder, every call is traced and every returned image is saved as evidence (Agent 2)."""
+    cls = RecordingMCPServer if recorder else MCPServerStdio
+    server = cls(
         name="windows-mcp",
         params={"command": find_command(settings), "args": ["serve", "--transport", "stdio", "--tools", ",".join(ALLOWED_TOOLS)]},
         tool_filter=create_static_tool_filter(allowed_tool_names=list(ALLOWED_TOOLS)),
         client_session_timeout_seconds=settings.agent2_tool_timeout_s,
         cache_tools_list=True,
+        tool_input_guardrails=guardrails or None,
     )
+    if recorder:
+        server.recorder = recorder
+    return server
+
+
+class CallRecorder:
+    """Traces MCP calls and saves screenshots to evidence/. Screenshots taken since the last
+    record_observation call are handed over with take_pending() (ARCHITECTURE.md D31)."""
+
+    def __init__(self, run_dir: Path, trace):
+        self.evidence_dir = run_dir / "evidence"
+        self.run_dir = run_dir
+        self.trace = trace
+        self.count = 0
+        self.pending: list[str] = []
+
+    def record(self, tool: str, arguments: dict | None, result) -> None:
+        self.count += 1
+        saved = save_images(result.content, self.evidence_dir, f"{self.count:03d}_{tool}")
+        rel = [p.relative_to(self.run_dir).as_posix() for p in saved]
+        self.pending += rel
+        text = " ".join(getattr(c, "text", "") for c in result.content if getattr(c, "type", None) == "text")
+        is_error = getattr(result, "is_error", getattr(result, "isError", None))
+        self.trace.write("mcp_call", n=self.count, tool=tool, arguments=arguments, is_error=is_error,
+                         text=text[:2000], images=rel)
+
+    def take_pending(self) -> list[str]:
+        out, self.pending = self.pending, []
+        return out
+
+
+class RecordingMCPServer(MCPServerStdio):
+    recorder: CallRecorder
+
+    async def call_tool(self, tool_name, arguments, meta=None):
+        result = await super().call_tool(tool_name, arguments, meta)
+        try:
+            self.recorder.record(tool_name, arguments, result)
+        except Exception as e:  # noqa: BLE001 - recording evidence must never break the tool call itself
+            log.warning("could not record MCP call %s: %s: %s", tool_name, type(e).__name__, e)
+        return result
 
 
 async def check_tool_list(server: MCPServerStdio) -> list[str]:

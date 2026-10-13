@@ -31,7 +31,7 @@ Test **the app**, its installation, registration and removal. Never test the hos
 |---|---|
 | **ENV** | The host is installed and its version is one the app supports; folders the app needs exist; OS facts the docs require (e.g. 64-bit). Skip host tests when `host_id` is `none`. |
 | **INST** | Silent install finishes; a Programs and Features (Uninstall) entry appears with the expected name and version; the expected files and folders exist; the installer's signature is valid and the signer matches the claimed publisher. |
-| **UNIN** | Uninstall removes the Uninstall entry; the installed files and folders are gone. |
+| **UNIN** | The app is uninstalled **the way a user does it: through Control Panel → Programs and Features** (write the step as that intent, never as a silent/msiexec uninstall); the Uninstall entry is removed; the installed files and folders are gone. A UI uninstall gives **no exit code**: observe what Agent 2 can see instead (e.g. `uninstall_completed` true/false, the entry, the files), never `uninstall_exit_code`. |
 
 **Required in every plan** (the self-check rejects the plan otherwise), with exactly these keys:
 1. an INST test that observes `install_exit_code`, expected `in` `["0", "3010"]`;

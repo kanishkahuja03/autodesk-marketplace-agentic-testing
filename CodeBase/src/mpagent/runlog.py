@@ -47,6 +47,11 @@ def attach_run_folder(run_dir: Path) -> None:
     log.addHandler(file_handler)
 
 
+def run_log_attached() -> bool:
+    """True once attach_run_folder() has run, i.e. lines are going to run.log."""
+    return any(isinstance(h, logging.FileHandler) for h in log.handlers)
+
+
 def stop_logging() -> None:
     """Close run.log so the file is complete and not locked."""
     for handler in list(log.handlers):

@@ -44,7 +44,7 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.1, 2026-10-12). If an 
 - **ADR-022 Install and uninstall paths:** install silently with msiexec + verbose log; uninstall through the Windows UI via Windows-MCP. *(D26, D27)*
 - **ADR-023 Cleanup in code:** a `finally` step runs `msiexec /x` only if the plug-in is still installed and UNIN didn't complete. It never changes a verdict. *(D28)*
 - **ADR-024 Time limits:** Agent 2 gets 150 turns, 120 s per tool call and 20 min in total (configurable). A limit hit → missing tests ERROR + cleanup. *(D29)*
-- **ADR-025 Incremental observations:** Agent 2 reports each test immediately through the local `record_observation` tool into `observations.json`. Our hook saves screenshots to `evidence/`. *(D30, D31)*
-- **ADR-026 Guardrails in code:** PowerShell commands must start with an allow-listed command. Registry is read-only. FileSystem writes only in the run folder, never deletes. *(D32, D33)*
+- **ADR-025 Incremental observations:** Agent 2 reports each test immediately through the local `record_observation` tool into `observations.json`. Our hook saves screenshots to `evidence/` and attaches them to the next `record_observation` automatically. *(D30, D31)*
+- **ADR-026 Guardrails in code:** PowerShell commands must start with an allow-listed command (installs via `Start-Process -FilePath msiexec.exe … -Wait -PassThru`). Registry is read-only. FileSystem writes only in the run folder, never deletes. *(D32, D33)*
 - **ADR-027 One model setting:** both agents use `OPENAI_MODEL`. *(D34)*
 - **ADR-028 Run result:** exit code 0 = completed (even with FAIL tests), 1 = stopped, 2 = crash. *(D35)*

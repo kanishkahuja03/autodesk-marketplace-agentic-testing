@@ -26,12 +26,36 @@ class Settings:
     agent2_timeout_min: int
     windows_mcp_command: str
     runs_dir: Path
+    # TEMPORARY (until the OpenAI key arrives): Gemini through Google's OpenAI-compatible endpoint.
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-flash-lite-latest"
+
+    @property
+    def uses_temporary_gemini(self) -> bool:
+        return not self.openai_api_key and bool(self.gemini_api_key)
 
     def require_openai(self) -> None:
         """Fail with a clear message before the first LLM call if the key or model is missing."""
+        if self.uses_temporary_gemini:
+            return
         missing = [n for n, v in (("OPENAI_API_KEY", self.openai_api_key), ("OPENAI_MODEL", self.openai_model)) if not v]
         if missing:
             raise ConfigError(f"missing in {PROJECT_ROOT / '.env'}: {', '.join(missing)} (see .env.example)")
+
+    def agent_model(self):
+        """The `model` argument for an Agents SDK Agent: the OpenAI model name, or (temporary) a Gemini model."""
+        self.require_openai()
+        if not self.uses_temporary_gemini:
+            return self.openai_model
+        from agents import OpenAIChatCompletionsModel
+        from openai import AsyncOpenAI
+
+        # a slow free-tier request must not block F5 for the client's default 10 min x retries
+        client = AsyncOpenAI(base_url=GEMINI_OPENAI_URL, api_key=self.gemini_api_key, timeout=180, max_retries=1)
+        return OpenAIChatCompletionsModel(model=self.gemini_model, openai_client=client)
+
+
+GEMINI_OPENAI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 
 def _int(name: str, default: int) -> int:
@@ -57,4 +81,6 @@ def load_settings() -> Settings:
         agent2_timeout_min=_int("AGENT2_TIMEOUT_MIN", 20),
         windows_mcp_command=os.environ.get("WINDOWS_MCP_COMMAND") or "windows-mcp",
         runs_dir=PROJECT_ROOT / "runs",
+        gemini_api_key=os.environ.get("GEMINI_API_KEY") or None,
+        gemini_model=os.environ.get("GEMINI_MODEL") or "gemini-flash-lite-latest",
     )
