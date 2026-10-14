@@ -1,12 +1,13 @@
 """The full pipeline behind the single entry point (ARCHITECTURE.md D16).
 
-S0 intake -> S1 installer static read -> Agent 1 -> preflight -> Agent 2 -> cleanup -> verdicts -> report
-(the last three always run once Agent 2 has started). Every run gets its own run folder with run.log and a
+S0 intake -> S1 installer static read -> Agent 1 -> preflight -> Agent 2 -> kill host -> cleanup -> verdicts
+-> report (the last four always run once Agent 2 has started). Every run gets its own run folder with run.log and a
 final status line: COMPLETED (exit 0), STOPPED (exit 1) or CRASHED (exit 2).
 """
 
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from mpagent.config import ConfigError, Settings, load_settings
@@ -16,9 +17,11 @@ from mpagent.design.msi import MsiError
 from mpagent.design.static_read import StaticReadError, run_static_read
 from mpagent.execute.agent2 import Agent2Error, run_agent2
 from mpagent.execute.cleanup import cleanup
+from mpagent.execute.host import CRASH_EVENTS_FILE, kill_host, save_crash_events
 from mpagent.execute.observations import load_observations
 from mpagent.execute.preflight import PreflightError, run_preflight
 from mpagent.execute.report import REPORT_FILE, summary_line, write_report
+from mpagent.hostnotes import host_process
 from mpagent.models import InstallerFacts, IntakeManifest, RunResults, TestPlan
 from mpagent.runlog import (
     attach_run_folder,
@@ -59,7 +62,7 @@ def run(input_dir: Path, runs_dir: Path | None = None, agent1_ask: AskFn | None 
         settings = load_settings()
         log.info("RUN: input %s", input_dir.resolve())
         design = _design_side(input_dir, runs_dir or settings.runs_dir, settings, agent1_ask)
-        _preflight(design.run_dir, design.facts, settings)
+        _preflight(design, settings)
         run_results = _execution_side(design, settings)
         if run_results is None:
             raise PipelineStopped("the report could not be written (see the error above)")
@@ -79,19 +82,21 @@ def _no_run_folder_note() -> str:
     return "" if run_log_attached() else " (no run folder was created, so there is no run.log)"
 
 
-def _preflight(run_dir: Path, facts: InstallerFacts, settings: Settings) -> None:
+def _preflight(design: Design, settings: Settings) -> None:
     """Code checks before Agent 2 (D20). Runs after Agent 1, so Agent 1 stays blind."""
     log.info("Preflight: start")
     try:
-        run_preflight(run_dir, facts, settings)
+        run_preflight(design.run_dir, design.facts, settings, host_process(design.plan.app.host_id))
     except PreflightError as e:
         raise PipelineStopped(f"preflight: {e} — Agent 2 not started") from e
     log.info("Preflight: done")
 
 
 def _execution_side(design: Design, settings: Settings) -> RunResults | None:
-    """Agent 2, then (in `finally`, whatever happened) cleanup (D28) and verdicts + report (D19, D29)."""
+    """Agent 2, then (in `finally`, whatever happened) kill the host, cleanup (D28) and verdicts + report (D19, D29).
+    The host is killed before cleanup, so an uninstall never runs under it (FUNCTIONAL_TESTS_PLAN.md L12)."""
     log.info("Agent 2 test execution: start")
+    started = datetime.now().astimezone()
     run_results: RunResults | None = None
     try:
         run_agent2(design.plan, design.run_dir, design.installer_path, settings, design.facts)
@@ -100,12 +105,31 @@ def _execution_side(design: Design, settings: Settings) -> RunResults | None:
         raise PipelineStopped(f"Agent 2 didn't finish: {e}") from e
     finally:
         _log_missing_observations(design)
+        _kill_host(design, started)
         try:
             cleanup(design.run_dir, design.facts)
         except Exception as e:  # noqa: BLE001 - cleanup must never hide the real outcome
             log.error("CLEANUP: failed with %s: %s — manual cleanup may be needed", type(e).__name__, e)
         run_results = _verdicts_and_report(design)
     return run_results
+
+
+def _kill_host(design: Design, started: datetime) -> None:
+    """Kill the host (before cleanup), then save any host crash records Windows wrote during Agent 2."""
+    hp = host_process(design.plan.app.host_id)
+    if hp is None:
+        return
+    try:
+        killed = kill_host(hp.processes)
+        log.info("HOST: %s", f"killed {len(killed)} process(es)" if killed else "not running")
+        crashes = save_crash_events(design.run_dir, hp.processes, started)
+    except Exception as e:  # noqa: BLE001 - must never hide the real outcome
+        log.error("HOST: kill/crash check failed with %s: %s — close the host by hand", type(e).__name__, e)
+        return
+    for c in crashes:
+        log.warning("HOST CRASH: %s", c.splitlines()[0] + " " + " ".join(c.splitlines()[1:3]))
+    if crashes:
+        log.warning("HOST: %d crash record(s) saved to %s", len(crashes), CRASH_EVENTS_FILE)
 
 
 def _verdicts_and_report(design: Design) -> RunResults | None:

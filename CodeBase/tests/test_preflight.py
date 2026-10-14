@@ -68,3 +68,16 @@ def test_windows_mcp_failure_stops(tmp_path, monkeypatch):
     monkeypatch.setattr(preflight.asyncio, "run", broken)
     with pytest.raises(preflight.PreflightError, match="Windows-MCP: tool list mismatch"):
         preflight.run_preflight(tmp_path, FACTS, load_settings())
+
+
+def test_running_host_stops(tmp_path, monkeypatch):
+    # FUNCTIONAL_TESTS_PLAN.md L12: a run would act in, and at the end kill, the user's own host session
+    from mpagent.hostnotes import host_process
+
+    monkeypatch.setattr(preflight, "is_elevated", lambda: True)
+    monkeypatch.setattr(preflight.asyncio, "run", lambda coro: (coro.close(), ["13 tools"])[1])
+    monkeypatch.setattr(preflight, "running_pids", lambda names: {4242: "acad.exe"})
+    with pytest.raises(preflight.PreflightError, match=r"the host is running \(acad.exe PID 4242\)"):
+        preflight.run_preflight(tmp_path, FACTS, load_settings(), host_process("autocad-plant3d"))
+    monkeypatch.setattr(preflight, "running_pids", lambda names: {})
+    preflight.run_preflight(tmp_path, FACTS, load_settings(), host_process("autocad-plant3d"))

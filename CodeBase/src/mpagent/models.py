@@ -183,6 +183,7 @@ Scalar = str | int | float | bool | None
 class Category(str, Enum):
     ENV = "ENV"
     INST = "INST"
+    LOAD = "LOAD"
     UNIN = "UNIN"
 
 
@@ -207,6 +208,11 @@ class Check(str, Enum):
     NOT_EXISTS = "not_exists"
     CONTAINS = "contains"
     MATCHES = "matches"
+    # decided by code from the raw Snapshot UI tree, not from Agent 2's value (FUNCTIONAL_TESTS_PLAN.md L4, L11)
+    WINDOW_IN_UI = "window_in_ui"  # value: regex of a window/document title inside the host window
+    SEEN_IN_UI = "seen_in_ui"  # value: exact element name (e.g. a ribbon tab label) inside the host window
+
+UI_CHECKS = {Check.WINDOW_IN_UI, Check.SEEN_IN_UI}
 
 
 class Citation(BaseModel):
@@ -260,12 +266,36 @@ class AppInfo(BaseModel):
     installer: InstallerRef
 
 
+class EntryPointKind(str, Enum):
+    RIBBON_TAB = "ribbon_tab"
+    MENU = "menu"
+    TOOLBAR = "toolbar"
+    COMMAND = "command"
+    OWN_WINDOW = "own_window"
+
+
+# Kinds that are visible in the host's UI right after start, so a LOAD test can look for them
+VISIBLE_ENTRY_POINTS = {EntryPointKind.RIBBON_TAB, EntryPointKind.MENU, EntryPointKind.TOOLBAR}
+
+
+class EntryPoint(BaseModel):
+    """Where the app shows up in its host, as its documents describe it (FUNCTIONAL_TESTS_PLAN.md §4.1)."""
+
+    kind: EntryPointKind
+    label: str = Field(description="The exact text the UI should show, e.g. the ribbon tab name, copied from a source")
+    items: list[str] = Field(description="Buttons or commands inside it, only names quoted in a source")
+    use_context: str | None = Field(
+        description="What must be open to *use* the app (e.g. a kind of project or drawing), as the docs say; null if not stated")
+    sources: list[Citation] = Field(description="Quotes for the label, items and use_context")
+
+
 class Summary(BaseModel):
     """Rendered into understanding.md."""
 
     purpose: str
     install_footprint: list[str]
     commands_or_ui: list[str]
+    entry_point: EntryPoint | None = Field(description="The app's entry point in the host UI; null if not documented")
     open_questions: list[str]
 
 
@@ -308,6 +338,7 @@ class Agent2Result(BaseModel):
 class Status(str, Enum):
     PASS = "PASS"
     FAIL = "FAIL"
+    NEEDS_REVIEW = "NEEDS_REVIEW"  # only a human looking at the screenshot can decide
     BLOCKED = "BLOCKED"
     ERROR = "ERROR"
 
@@ -318,6 +349,28 @@ class CheckResult(BaseModel):
     expected: Scalar | list[str]
     observed: Scalar
     ok: bool
+    needs_review: bool = False
+    reported: Scalar = Field(default=None, description="For UI checks: Agent 2's own value, shown but not used")
+
+
+class HostLocate(BaseModel):
+    """How code finds the host executable: a registry value under a product key whose `match_value` matches."""
+
+    registry_root: str = Field(description=r"e.g. 'HKLM:\SOFTWARE\Vendor\Product'; product keys are searched up to 2 levels below")
+    value: str = Field(description="Registry value holding the install folder, e.g. 'InstallLocation'")
+    match_value: str = Field(description="Registry value used to pick the product key, e.g. 'ProductName'")
+    match: str = Field(description="Regular expression the match_value must match")
+
+
+class HostProcess(BaseModel):
+    """`host_process` front matter of a host-notes file: the host facts code needs (FUNCTIONAL_TESTS_PLAN.md L9)."""
+
+    locate: HostLocate
+    executable: str = Field(description="File name inside the install folder, e.g. 'host.exe'")
+    args: list[str] = Field(default_factory=list, description="Exact launch arguments")
+    processes: list[str] = Field(description="Process image names, e.g. ['host.exe']")
+    main_window: str = Field(description="Regular expression for the host's main window title")
+    new_document: str = Field(description="Regular expression for the title of a new default document")
 
 
 class TestResult(BaseModel):

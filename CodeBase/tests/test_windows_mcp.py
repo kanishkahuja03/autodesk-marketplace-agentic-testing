@@ -3,6 +3,7 @@ Run with: uv run pytest"""
 
 import asyncio
 import base64
+import os
 import shutil
 from types import SimpleNamespace
 
@@ -16,6 +17,7 @@ from mpagent.execute.windows_mcp import (
     clean_result,
     clean_text,
     save_images,
+    server_env,
     windows_mcp_server,
 )
 
@@ -88,3 +90,21 @@ def test_clean_result_keeps_images_and_returns_a_copy():
     cleaned = clean_result(original)
     assert "CLIXML" in original.content[0].text  # the original (traced) result is untouched
     assert "CLIXML" not in cleaned.content[0].text and cleaned.content[1] == original.content[1]
+
+
+def test_server_gets_the_normal_environment_without_secrets():
+    # runs 20261013-175002/-184220: with the MCP SDK's 12-variable environment, acad.exe crashed at start
+    env = server_env({"ProgramData": r"C:\ProgramData", "ProgramFiles": r"C:\Program Files",
+                      "CommonProgramFiles": r"C:\Program Files\Common Files", "PATH": r"C:\Windows",
+                      "OPENAI_API_KEY": "sk-x", "GEMINI_API_KEY": "g", "GITHUB_TOKEN": "t", "DB_PASSWORD": "p",
+                      "CLAUDE_CODE_MESSAGING_TOKEN": "m", "OPENAI_MODEL": "gpt-5.5"})
+    assert {"ProgramData", "ProgramFiles", "CommonProgramFiles", "PATH", "OPENAI_MODEL"} <= set(env)
+    assert not {"OPENAI_API_KEY", "GEMINI_API_KEY", "GITHUB_TOKEN", "DB_PASSWORD", "CLAUDE_CODE_MESSAGING_TOKEN"} & set(env)
+
+
+def test_server_params_carry_the_environment():
+    server = windows_mcp_server(load_settings())
+    env = server.params.env
+    upper = {k.upper(): v for k, v in env.items()}  # Windows names are case-insensitive; os.environ upper-cases them
+    assert upper["PROGRAMDATA"] == os.environ["ProgramData"] and "PROGRAMFILES" in upper
+    assert "OPENAI_API_KEY" not in upper and "GEMINI_API_KEY" not in upper

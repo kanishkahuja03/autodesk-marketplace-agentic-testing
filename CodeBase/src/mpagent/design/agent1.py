@@ -2,7 +2,7 @@
 
 One LLM agent with no tools reads the evidence pack and returns a TestPlan. Code self-checks the plan;
 on errors the agent gets them back and retries (at most 2 times). Then code adds the built-in ENV-000
-and writes testcases.yaml / testcases.json / understanding.md. Nothing on the machine is inspected.
+(and LOAD-000 for hosts with host_process, FUNCTIONAL_TESTS_PLAN.md L2) and writes testcases.yaml / testcases.json / understanding.md. Nothing on the machine is inspected.
 """
 
 import io
@@ -15,11 +15,13 @@ from ruamel.yaml import YAML
 
 from mpagent.config import PROJECT_ROOT, Settings
 from mpagent.design.evidence import Source, build_sources, render_pack
-from mpagent.design.selfcheck import BUILT_IN_ENV_ID, check_plan
+from mpagent.design.selfcheck import BUILT_IN_ENV_ID, BUILT_IN_LOAD_ID, check_plan
+from mpagent.hostnotes import host_process
 from mpagent.models import (
     Category,
     Check,
     Expectation,
+    HostProcess,
     InstallerFacts,
     IntakeManifest,
     Origin,
@@ -70,6 +72,7 @@ def design_tests(run_dir: Path, manifest: IntakeManifest, facts: InstallerFacts,
     trace = Trace(run_dir)
     sources = build_sources(run_dir, manifest, facts)
     host_ids = host_catalogue().keys()
+    load_hosts = [h for h in host_ids if host_process(h)]
     conversation: str | list = render_pack(sources)
 
     plan: TestPlan | None = None
@@ -83,7 +86,7 @@ def design_tests(run_dir: Path, manifest: IntakeManifest, facts: InstallerFacts,
             raise Agent1Error(f"LLM call failed: {type(e).__name__}: {e}") from e
         trace.write("agent1_response", attempt=attempt, plan=plan.model_dump(mode="json"))
 
-        errors = check_plan(plan, sources, host_ids)
+        errors = check_plan(plan, sources, host_ids, load_hosts)
         trace.write("agent1_selfcheck", attempt=attempt, errors=errors)
         if not errors:
             log.info("Agent 1 attempt %d: self-check passed", attempt)
@@ -98,7 +101,7 @@ def design_tests(run_dir: Path, manifest: IntakeManifest, facts: InstallerFacts,
         raise Agent1Error(f"self-check failed after {MAX_RETRIES} retries ({len(errors)} errors; "
                           "see run.log and testcases.rejected.yaml)")
 
-    plan = add_built_in_tests(plan, facts)
+    plan = add_built_in_tests(plan, facts, host_process(plan.app.host_id))
     write_outputs(plan, sources, run_dir)
     return plan
 
@@ -108,8 +111,12 @@ def _retry_message(errors: list[str]) -> str:
     return f"The self-check found these errors in your test plan:\n{lines}\n\nReturn a corrected, complete TestPlan."
 
 
-def add_built_in_tests(plan: TestPlan, facts: InstallerFacts) -> TestPlan:
-    """Prepend ENV-000 (executed by code in the preflight, D23) and make every INST test depend on it."""
+CATEGORY_ORDER = [Category.ENV, Category.INST, Category.LOAD, Category.UNIN]  # the order Agent 2 runs them
+
+
+def add_built_in_tests(plan: TestPlan, facts: InstallerFacts, host: HostProcess | None = None) -> TestPlan:
+    """Prepend ENV-000 (executed by code in the preflight, D23) and make every INST test depend on it.
+    For a host with host_process, also add LOAD-000 (executed by Agent 2, decided by code from the UI tree)."""
     props = facts.properties
     product_code, product_name = props.get("ProductCode"), props.get("ProductName")
     lookup = " or ".join(x for x in (f"ProductCode {product_code}" if product_code else "",
@@ -127,7 +134,31 @@ def add_built_in_tests(plan: TestPlan, facts: InstallerFacts) -> TestPlan:
         if t.category is Category.INST and BUILT_IN_ENV_ID not in t.preconditions:
             t = t.model_copy(update={"preconditions": [BUILT_IN_ENV_ID, *t.preconditions]})
         tests.append(t)
-    return plan.model_copy(update={"testcases": [env000, *tests]})
+    tests = [env000, *tests]
+    if host is not None:
+        tests.append(load000(tests, host))
+    # built-in tests first in their category; stable, so Agent 1's order is kept otherwise
+    tests.sort(key=lambda t: (CATEGORY_ORDER.index(t.category), t.origin is not Origin.BUILT_IN))
+    return plan.model_copy(update={"testcases": tests})
+
+
+def load000(tests: list[TestCase], host: HostProcess) -> TestCase:
+    """LOAD-000 "host ready with a new document" (FUNCTIONAL_TESTS_PLAN.md L2, L11, L16). Same for every app
+    on a host: its regexes come from the host notes. Depends on the INST test(s) observing install_exit_code."""
+    installs = [t.id for t in tests if t.category is Category.INST and "install_exit_code" in t.observe]
+    return TestCase(
+        id=BUILT_IN_LOAD_ID, origin=Origin.BUILT_IN, category=Category.LOAD,
+        title="Host starts with the app installed and opens a new document", source=None, preconditions=installs,
+        steps=["Start the host exactly as given in 'App under test' (host-interaction skill)",
+               "Answer a one-time load/trust prompt for the app under test; stop at any other dialog",
+               "Open the host's default new document (host notes)",
+               "Take a Snapshot of the host window, then record this test"],
+        observe=["host_started", "document_opened", "error_dialog_seen", "load_prompt_seen"],
+        expected=[Expectation(key="host_started", check=Check.WINDOW_IN_UI, value=host.main_window, values=None),
+                  Expectation(key="document_opened", check=Check.WINDOW_IN_UI, value=host.new_document, values=None),
+                  Expectation(key="error_dialog_seen", check=Check.NOT_EXISTS, value=None, values=None)],
+        priority=Priority.P1,
+    )
 
 
 def write_outputs(plan: TestPlan, sources: list[Source], run_dir: Path) -> None:

@@ -150,3 +150,66 @@ def test_input_names_the_app_and_real_folders(tmp_path):
     assert wow + FACTS.properties["ProductCode"] in prompt
     assert f"%APPDATA% = {os.environ['APPDATA']}" in prompt
     assert os.path.expandvars(plugins) in prompt
+
+
+# ---------------------------------------------------------------- LOAD (FUNCTIONAL_TESTS_PLAN.md L5, L9, L17)
+def load_plan() -> TestPlan:
+    from plans import load_plan_data
+
+    from mpagent.design.agent1 import add_built_in_tests
+    from mpagent.hostnotes import host_process
+    return add_built_in_tests(TestPlan.model_validate(load_plan_data()), FACTS, host_process("autocad-plant3d"))
+
+
+def test_snapshot_text_is_saved_in_full_and_attached(tmp_path):
+    trace = Trace(tmp_path)
+    calls = CallRecorder(tmp_path, trace)
+    big = "UI Tree:\n" + "x" * 50_000  # longer than what the model and the trace get
+    calls.record("Snapshot", {}, mcp_result(SimpleNamespace(type="text", text=big)))
+    assert calls.has_pending_snapshot()
+    saved = tmp_path / "evidence" / "001_Snapshot_ui.txt"
+    assert saved.read_text(encoding="utf-8") == big
+    calls.record("Click", {}, mcp_result(SimpleNamespace(type="text", text="clicked")))
+    assert calls.take_pending() == ["evidence/001_Snapshot_ui.txt"]  # only Snapshots are saved as text
+
+
+def test_ui_tests_need_a_snapshot_before_recording(tmp_path):
+    trace = Trace(tmp_path)
+    calls = CallRecorder(tmp_path, trace)
+    obs = agent2.ObservationRecorder(tmp_path, load_plan(), calls, trace)
+    label = [KeyValue(key="entry_point_label", value="P&ID Exporter")]
+
+    assert "Take a Snapshot of the host window first" in obs.record("LOAD-001", True, label, [], None)
+    assert obs.record("LOAD-001", False, [KeyValue(key="entry_point_label", value=None)], [], "install failed") == \
+        "Recorded LOAD-001."  # not executed: no Snapshot needed
+    calls.record("Snapshot", {}, mcp_result(SimpleNamespace(type="text", text="UI Tree:\n")))
+    assert obs.record("LOAD-001", True, label, [], None) == "Recorded LOAD-001."
+    assert load_observations(tmp_path)[0].evidence == ["evidence/001_Snapshot_ui.txt"]
+
+
+def test_host_interaction_skill_and_host_block_only_with_load(tmp_path):
+    assert "# Host interaction: LOAD tests" in agent2.instructions("autocad-plant3d", with_host_interaction=True)
+    assert "# Host interaction" not in agent2.instructions("autocad-plant3d")
+    assert agent2.host_launch(plan()) is None  # no LOAD tests in the plan
+    host = agent2.HostLaunch(executable=r"C:\Host\host.exe", args=["/a", "b"], processes=["host.exe"],
+                             main_window="^Host", new_document="Doc1")
+    prompt = agent2.build_input(load_plan(), tmp_path, tmp_path / "x.msi", None, FACTS, host)
+    assert r"- executable: C:\Host\host.exe" in prompt and '- args: ["/a", "b"]' in prompt
+    assert "(ENV, INST, LOAD, UNIN)" in prompt
+    missing = agent2.build_input(load_plan(), tmp_path, tmp_path / "x.msi", None, FACTS,
+                                 agent2.HostLaunch(None, [], ["host.exe"], "^Host", "Doc1"))
+    assert "NOT FOUND" in missing and "executed: false" in missing
+
+
+def test_install_test_cannot_be_recorded_as_executed_without_running_the_installer(tmp_path):
+    # run 20261013-175002: INST-001 was recorded as executed (exit code null) although msiexec never ran
+    from mpagent.execute.guardrails import CallPolicy
+
+    trace = Trace(tmp_path)
+    policy = CallPolicy(tmp_path)
+    obs = agent2.ObservationRecorder(tmp_path, plan(), CallRecorder(tmp_path, trace), trace, policy)
+    exit_code = [KeyValue(key="install_exit_code", value=None)]
+    assert "the installer hasn't run in this run" in obs.record("INST-001", True, exit_code, [], None)
+    assert obs.record("INST-001", False, exit_code, [], "not reached") == "Recorded INST-001."
+    policy.installed = True
+    assert obs.record("INST-001", True, [KeyValue(key="install_exit_code", value=0)], [], None) == "Recorded INST-001."

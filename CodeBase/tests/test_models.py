@@ -8,8 +8,11 @@ from pydantic import ValidationError
 from ruamel.yaml import YAML
 
 from mpagent.models import (
+    UI_CHECKS,
     Agent2Result,
+    Category,
     Check,
+    EntryPointKind,
     Observation,
     Origin,
     Status,
@@ -35,6 +38,12 @@ summary:
   purpose: "Exports P&ID symbols with position data and properties to an interface file."
   install_footprint: ['%AppData%\Autodesk\ApplicationPlugins\pidExport.bundle']
   commands_or_ui: ["P&ID Exporter ribbon tab"]
+  entry_point:
+    kind: ribbon_tab
+    label: "P&ID Exporter"
+    items: [Export]
+    use_context: "in a P&ID project and have a drawing open"
+    sources: [{ doc: "D2", line: 7, quote: "a new tab called “P&ID Exporter”" }]
   open_questions: ["ALLUSERS=1 but files go to %AppData%: which user profile?"]
 required_env: [PLUGIN_DIR, INSTALLER_PATH]
 testcases:
@@ -87,6 +96,12 @@ def test_plan_loads_from_yaml():
     assert plan.testcases[0].origin is Origin.BUILT_IN and plan.testcases[0].source is None
     assert plan.testcases[1].expected[0].check is Check.IN
     assert plan.summary.install_footprint == [r"%AppData%\Autodesk\ApplicationPlugins\pidExport.bundle"]
+    assert plan.summary.entry_point.kind is EntryPointKind.RIBBON_TAB and plan.summary.entry_point.items == ["Export"]
+
+
+def test_load_category_ui_checks_and_needs_review_exist():
+    assert Category("LOAD") is Category.LOAD and Status("NEEDS_REVIEW") is Status.NEEDS_REVIEW
+    assert {Check("window_in_ui"), Check("seen_in_ui")} == UI_CHECKS
 
 
 def test_plan_round_trips_through_yaml_and_json():

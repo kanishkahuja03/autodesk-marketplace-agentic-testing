@@ -31,6 +31,22 @@
 {% else -%}
 - (not stated)
 {% endfor %}
+## Entry point in the host
+{% set ep = plan.summary.entry_point -%}
+{% if ep -%}
+| | |
+|---|---|
+| Kind | `{{ ep.kind.value }}` |
+| Label | {{ ep.label }} |
+| Items | {{ ep.items | join(", ") if ep.items else "-" }} |
+| Needed to use it (Phase 2) | {{ ep.use_context or "-" }} |
+
+{% for c in ep.sources -%}
+- {{ c.doc }}{% if c.line %}:{{ c.line }}{% endif %}: "{{ c.quote }}"
+{% endfor %}
+{% else -%}
+- (not documented)
+{% endif %}
 ## Open questions
 {% for q in plan.summary.open_questions -%}
 - {{ q }}

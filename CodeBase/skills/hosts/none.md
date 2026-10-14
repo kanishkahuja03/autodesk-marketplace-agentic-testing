@@ -15,5 +15,5 @@ Use this when the app runs on its own (it has its own executable and isn't loade
   - a Programs and Features (Uninstall) entry.
 - The install folder is `${PLUGIN_DIR}` (the same placeholder name keeps the rules simple), resolved by Agent 2 from the Uninstall entry's `InstallLocation` or from the installer facts.
 
-## Not in scope for ENV/INST/UNIN
-Starting the app and using its features. Those are LOAD/FUNC tests, which come later.
+## No LOAD tests
+There's no host to start, so these notes have no `host_process` block. Code adds no LOAD-000, and Agent 1 writes no LOAD test. Starting a standalone app and using its features are FUNC tests (Phase 2).

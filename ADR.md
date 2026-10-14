@@ -6,13 +6,13 @@ Entry formats:
 1. `<relative document path>` : short description of the document
 2. A short decision, stated directly
 
-Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.2, 2026-10-13). If an entry here conflicts with it, `ARCHITECTURE.md` wins. Then update this index.
+Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an entry here conflicts with it, `ARCHITECTURE.md` wins. Then update this index.
 
 ## ADR Index
 
 ### Documents
-- `./ARCHITECTURE.md` : V2.2 build plan. Decisions D1–D39, the one-F5 flow, agents, preflight, guardrails, cleanup, data contracts, skills, tech stack, code layout, build steps.
-- `./FUNCTIONAL_TESTS_PLAN.md` : draft plan for LOAD/FUNC tests (branch `Dev-FunctionalTest`); not yet agreed.
+- `./ARCHITECTURE.md` : V2.3 build plan. Decisions D1–D55, the one-F5 flow, agents, preflight, guardrails, cleanup, data contracts, skills, tech stack, code layout, build steps.
+- `./FUNCTIONAL_TESTS_PLAN.md` : LOAD test plan v3 (agreed in the grill-me review, 2026-10-13; branch `Dev-FunctionalTest`), with the reasoning behind D40–D52 and the Phase 2 (FUNC) outline.
 - `./AGENT_TOOLING_REVIEW.md` : Agent 1 components and Agent 2 Windows-MCP tools, one by one, with keep/drop recommendations for team review.
 - `./ARCHITECTURE_COMPARISON.md` : Our approach vs the `AppStore automation/` approach. Pros and cons, and what V2 took from each.
 - `./DESKTOP_UI_AUTOMATION_RESEARCH.md` : Research on desktop UI automation MCP servers, models and libraries.
@@ -24,8 +24,8 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.2, 2026-10-13). If an 
 - **ADR-003 LLM provider:** enterprise OpenAI API, with the model name set in `.env`. Gemini dropped. Cost is not a constraint for the POC. *(D2)*
 - **ADR-004 Agent framework:** OpenAI Agents SDK (Python). It supplies the agent loop, MCP client, structured output and tool filtering. *(D3)*
 - **ADR-005 Machine interaction:** Agent 2 drives the machine only through Windows-MCP (UI, Registry, FileSystem, Process, PowerShell), using a 13-tool allow-list enforced in two places. There is no action catalogue of our own. The one local tool is `record_observation` (ADR-025), which only writes a file. *(D5, D6)*
-- **ADR-006 Verdict by code:** Agent 2 reports raw observations only. Code compares them with each test's `expected` checks and sets PASS / FAIL / BLOCKED / ERROR. The LLM never sets a status. *(D7)*
-- **ADR-007 Demo scope:** ENV, INST and UNIN tests only. Fully automatic, no human review gate. Demo app: P&ID Connector Exporter. *(D8, D9, D14)*
+- **ADR-006 Verdict by code:** Agent 2 reports raw observations only. Code compares them with each test's `expected` checks and sets PASS / FAIL / NEEDS_REVIEW / BLOCKED / ERROR. The LLM never sets a status. *(D7)*
+- **ADR-007 Demo scope:** ENV, INST, LOAD and UNIN tests (LOAD added 2026-10-13, ADR-033). Fully automatic, no human review gate. Demo app: P&ID Connector Exporter. *(D8, D9, D14)*
 - **ADR-008 Reuse existing intake:** keep the existing `intake.py` and installer static read (`static_read.py`, `msi.py`). *(D10)*
 - **ADR-009 Local tracing only:** OpenAI tracing is disabled. Every LLM turn and MCP call is logged to `trace.jsonl` in the run folder. *(D11)*
 - **ADR-010 Execution environment:** the POC runs on the dev machine, elevated. VM or Sandbox isolation is a later phase. *(D12)*
@@ -44,7 +44,7 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.2, 2026-10-13). If an 
 - **ADR-021 Gating:** the only hard stops are the preflight checks. Other dependencies are per-test preconditions, applied afterwards by the verdict engine as BLOCKED. Agent 2 runs every test. *(D25)*
 - **ADR-022 Install and uninstall paths:** install **and uninstall silently** with msiexec + verbose logs (`install.log`, `uninstall.log`). Code creates `evidence\` before Agent 2; both exit codes are read from the logs, never from PowerShell's status code. *(D26, D27; the Programs and Features UI uninstall was dropped on 2026-10-13 after a wrong-program selection.)*
 - **ADR-023 Cleanup in code:** a `finally` step runs `msiexec /x` only if the plug-in is still installed and UNIN didn't complete. It never changes a verdict. *(D28)*
-- **ADR-024 Time limits:** Agent 2 gets 150 turns, 120 s per tool call and 20 min in total (configurable). A limit hit → missing tests ERROR + cleanup. *(D29)*
+- **ADR-024 Time limits:** Agent 2 gets 150 turns, 120 s per tool call and 40 min in total (configurable; raised from 20 for LOAD). A limit hit → missing tests ERROR + cleanup. *(D29)*
 - **ADR-025 Incremental observations:** Agent 2 reports each test immediately through the local `record_observation` tool into `observations.json`. Our hook saves screenshots to `evidence/` and attaches them to the next `record_observation` automatically. Evidence files that don't exist are rejected; an executed observation is never replaced by a not-executed one. *(D30, D31)*
 - **ADR-026 Guardrails in code:** PowerShell commands must start with an allow-listed command (msiexec via `Start-Process -FilePath msiexec.exe … -Wait`; `Select-String` for reading logs; no `;`, script blocks, subexpressions, redirection or line breaks, and no `&` outside quotes). Registry is read-only. **FileSystem is read-only**, and whole-file reads over 50 KB need `offset`/`limit`. *(D32, D33)*
 - **ADR-027 One model setting:** both agents use `OPENAI_MODEL`. *(D34)*
@@ -55,3 +55,11 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.2, 2026-10-13). If an 
 - **ADR-030 Cleaned, capped tool results:** PowerShell CLIXML noise is removed (errors decoded) and results over 20,000 characters are cut off before the model sees them; the original goes to the trace. *(D37)*
 - **ADR-031 App facts for Agent 2:** code passes DisplayName, ProductCode, the Uninstall registry paths, expanded install roots and the machine's real folders, so Agent 2 never guesses names or paths. *(D38)*
 - **ADR-032 Stopping a run:** Ctrl+C lets cleanup and the report run; the VS Stop button kills the process, and the next run's ENV-000 prints the exact uninstall command. *(D39)*
+
+### Decisions from the LOAD grill-me review (2026-10-13)
+- **ADR-033 LOAD tests:** the host starts with its default new document (built-in LOAD-000, written by code), and the app's documented entry point label is visible (exactly one agent test, LOAD-001, required for ribbon tabs, menus, toolbars). App-specific documents are FUNC (later). *(D40–D42)*
+- **ADR-034 Host facts in host notes:** `host_process` front matter (registry lookup, exe, exact args, processes, title regexes) is the only place host facts for code live. *(D43)*
+- **ADR-035 UI verdicts from the raw UI tree:** `window_in_ui` / `seen_in_ui` are decided by code from the full Snapshot text, only inside the host's main window, exact element names; NEEDS_REVIEW when only a screenshot could tell. *(D44–D46)*
+- **ADR-036 Host safety:** one Agent 2 session; App starts only the host with its exact args; no uninstall while the host runs; host closed by Process kill; preflight stops if the host already runs; `finally` kills the host before cleanup. *(D47–D52)*
+- **ADR-037 Order and crashes enforced by code:** no host start before the installer ran; no executed install test without it; a host crash gets one restart, and code saves Windows' crash records for the host to the evidence and the report. *(D53, D54)*
+- **ADR-038 Normal environment for Windows-MCP:** the server (and every program it starts) gets the normal Windows environment without secrets, not the MCP SDK's 12-variable default; that default made Plant 3D crash at every pipeline start. *(D55)*

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from mpagent.execute.guardrails import CallPolicy, check_tool_call, tool_guardrail
+from mpagent.execute.host import HostLaunch
 from mpagent.runlog import Trace
 
 GUID = "{DFA9AB30-EDDB-4E96-BFF7-086145A9E483}"
@@ -102,7 +103,7 @@ def test_process_kill_only_for_msiexec(run_dir):
 
 def test_ui_tools_are_not_restricted(run_dir):
     assert check_tool_call("Click", {"label": 3}, run_dir) is None
-    assert check_tool_call("App", {"mode": "launch_executable", "executable": "control.exe"}, run_dir) is None
+    assert check_tool_call("App", {"mode": "switch", "name": "Any window"}, run_dir) is None
 
 
 def test_sdk_guardrail_rejects_logs_and_traces(run_dir):
@@ -144,3 +145,62 @@ def test_identical_calls_are_limited_but_looking_again_is_not(run_dir):
 
 def test_policy_still_applies_static_rules(run_dir):
     assert "read-only" in CallPolicy(run_dir).check("Registry", {"mode": "delete", "path": r"HKLM:\X"})
+
+
+
+# ---------------------------------------------------------------- host rules (FUNCTIONAL_TESTS_PLAN.md L7, L9, L13, L14)
+HOST = HostLaunch(executable=r"C:\Program Files\Vendor\Host 2027\host.exe", args=["/product", "X", "/language", "en-US"],
+                  processes=["host.exe"], main_window="^Host", new_document="Doc1")
+LAUNCH = {"mode": "launch_executable", "executable": HOST.executable, "args": HOST.args}
+
+
+def test_app_starts_only_the_host_with_its_exact_args(run_dir):
+    app = lambda args, host=HOST: check_tool_call("App", args, run_dir, host)
+    assert app(LAUNCH) is None
+    assert app({**LAUNCH, "executable": HOST.executable.lower().replace("\\", "/")}) is None  # same path
+    assert app({**LAUNCH, "args": '/product X /language "en-US"'}) is None  # args as one string
+    assert "exactly" in app({**LAUNCH, "args": ["/language", "en-US"]})  # e.g. without /product: another product
+    assert "exactly" in app({**LAUNCH, "executable": r"C:\Windows\System32\control.exe"})
+    assert "not allowed" in app({"mode": "launch", "name": "Notepad"})  # by Start menu name
+    assert "may not start programs" in app(LAUNCH, host=None)
+    assert "may not start programs" in app(LAUNCH, host=HostLaunch(None, [], ["host.exe"], "^Host", "Doc1"))
+    assert app({"mode": "resize", "window_size": [800, 600]}) is None
+
+
+def test_process_kill_allows_host_processes_by_name_only(run_dir):
+    kill = lambda **a: check_tool_call("Process", {"mode": "kill", **a}, run_dir, HOST)
+    assert kill(name="host.exe") is None and kill(name="HOST") is None and kill(name="msiexec") is None
+    assert "only allowed" in kill(name="devenv.exe")
+    assert "pid is not allowed" in kill(pid=1234)
+    assert "only allowed" in check_tool_call("Process", {"mode": "kill", "name": "host.exe"}, run_dir)  # no host
+
+
+def test_waits_are_capped_below_the_tool_timeout(run_dir):
+    wait = lambda tool, **a: check_tool_call(tool, a, run_dir, None, 105)
+    assert wait("WaitFor", condition="active_window", window_name="Host", timeout=105) is None
+    assert "call again" in wait("WaitFor", condition="active_window", window_name="Host", timeout=180)
+    assert "maximum of 105" in wait("Wait", duration=300)
+    assert wait("Wait", duration=5) is None and wait("WaitFor", condition="text_exists", text="x") is None
+
+
+UNINSTALL = ("Start-Process -FilePath msiexec.exe -ArgumentList '/x','" + GUID + "','/qn','/norestart','/l*v',"
+             r"""'"D:\run\evidence\uninstall.log"' -Wait""")
+
+
+def test_no_uninstall_while_the_host_runs(run_dir):
+    running = {"yes": True}
+    policy = CallPolicy(run_dir, HOST, 105, host_running=lambda: running["yes"])
+    reason = policy.check("PowerShell", {"command": UNINSTALL})
+    assert reason is not None and "kill it first" in reason and "host.exe" in reason
+    running["yes"] = False
+    assert policy.check("PowerShell", {"command": UNINSTALL}) is None
+    assert CallPolicy(run_dir).check("PowerShell", {"command": UNINSTALL}) is None  # no host in this run
+
+
+def test_host_may_not_start_before_the_installer_ran(run_dir):
+    # run 20261013-175002: Agent 2 started the host first and never installed the app
+    policy = CallPolicy(run_dir, HOST, 105)
+    assert "installer hasn't run yet" in policy.check("App", LAUNCH)
+    assert policy.check("App", {"mode": "switch", "name": "Host"}) is None  # window focus is fine
+    assert policy.check("PowerShell", {"command": INSTALL}) is None
+    assert policy.check("App", LAUNCH) is None and policy.check("App", LAUNCH) is None  # a restart after a crash

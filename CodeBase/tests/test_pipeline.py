@@ -50,11 +50,20 @@ needs_real_inputs = pytest.mark.skipif(not REAL_PLUGIN.exists(), reason="real pl
 
 @pytest.fixture
 def no_machine(monkeypatch):
-    """Skip everything that touches the machine; records whether cleanup ran."""
-    calls = {"agent2": 0, "cleanup": 0}
-    monkeypatch.setattr(pipeline, "run_preflight", lambda run_dir, facts, settings: None)
-    monkeypatch.setattr(pipeline, "run_agent2", lambda *a: calls.__setitem__("agent2", calls["agent2"] + 1))
-    monkeypatch.setattr(pipeline, "cleanup", lambda run_dir, facts: calls.__setitem__("cleanup", calls["cleanup"] + 1))
+    """Skip everything that touches the machine; records whether the host kill and cleanup ran, and in which order."""
+    calls = {"agent2": 0, "cleanup": 0, "order": []}
+
+    def step(name):
+        def run(*_a):
+            calls[name] = calls.get(name, 0) + 1
+            calls["order"].append(name)
+            return []
+        return run
+    monkeypatch.setattr(pipeline, "run_preflight", lambda *a: None)
+    monkeypatch.setattr(pipeline, "run_agent2", step("agent2"))
+    monkeypatch.setattr(pipeline, "kill_host", step("kill_host"))
+    monkeypatch.setattr(pipeline, "save_crash_events", lambda *a: [])
+    monkeypatch.setattr(pipeline, "cleanup", step("cleanup"))
     return calls
 
 
@@ -65,7 +74,8 @@ def test_real_plugin_full_run_completes(tmp_path, no_machine):
     run_dir = _only_run_dir(tmp_path / "runs")
     for name in ("installer_facts.json", "testcases.yaml", "testcases.json", "understanding.md", "trace.jsonl"):
         assert (run_dir / name).exists(), name
-    assert no_machine == {"agent2": 1, "cleanup": 1}
+    # the host is killed before cleanup, so the uninstall never runs under it (FUNCTIONAL_TESTS_PLAN.md L12)
+    assert no_machine["order"] == ["agent2", "kill_host", "cleanup"]
     assert (run_dir / "results.json").exists() and (run_dir / "report.html").exists()
     last = _last_line(run_dir)
     assert " COMPLETED: " in last and "report:" in last  # stand-in Agent 2 recorded nothing: all ERROR/BLOCKED
@@ -81,7 +91,8 @@ def test_agent2_failure_stops_after_cleanup(tmp_path, no_machine, monkeypatch):
     assert no_machine["cleanup"] == 1
     run_dir = _only_run_dir(tmp_path / "runs")
     log_text = (run_dir / RUN_LOG).read_text(encoding="utf-8")
-    assert "observations: 0 of 4 tests recorded; missing: ENV-000, INST-001, INST-002, UNIN-001" in log_text
+    assert ("observations: 0 of 5 tests recorded; missing: ENV-000, INST-001, INST-002, LOAD-000, UNIN-001"
+            in log_text)  # LOAD-000 is built in for a host with host_process
     assert (run_dir / "report.html").exists()  # the report is still written for a cut-off run
     assert "STOPPED: Agent 2 didn't finish: time limit reached (20 min)" in _last_line(run_dir)
 

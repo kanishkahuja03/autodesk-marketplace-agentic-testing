@@ -3,13 +3,15 @@
 import json
 
 import pytest
-from plans import good_plan_data
+from plans import good_plan_data, load_plan_data
+from test_ui_tree import HOST, MAIN
 
 from mpagent.design.agent1 import add_built_in_tests
 from mpagent.execute.agent2 import RESULT_FILE
 from mpagent.execute.observations import save_observation
 from mpagent.execute.report import write_report
-from mpagent.execute.verdict import check_one, evaluate, norm
+from mpagent.execute.verdict import UiContext, check_one, evaluate, norm
+from mpagent.hostnotes import host_process
 from mpagent.models import (
     Check,
     Expectation,
@@ -115,7 +117,7 @@ def test_report_files_are_written(tmp_path):
     (tmp_path / RESULT_FILE).write_text(json.dumps({"done": True, "env": []}), encoding="utf-8")
     run = write_report(plan(), tmp_path)
 
-    assert run.counts == {"PASS": 4, "FAIL": 0, "BLOCKED": 0, "ERROR": 0} and run.agent2_finished
+    assert run.counts == {"PASS": 4, "FAIL": 0, "NEEDS_REVIEW": 0, "BLOCKED": 0, "ERROR": 0} and run.agent2_finished
     assert json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))["counts"]["PASS"] == 4
     html = (tmp_path / "report.html").read_text(encoding="utf-8")
     assert "<title>Validation Report</title>" in html and 'id="UNIN-001"' in html
@@ -128,3 +130,102 @@ def test_report_after_cut_off_run_marks_missing_tests_error(tmp_path):
     assert not run.agent2_finished
     assert run.counts["ERROR"] == 1 and run.counts["BLOCKED"] == 2  # INST-001 ERROR, the rest blocked by it
     assert "Agent 2 did not finish" in (tmp_path / "report.html").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- LOAD: UI checks (FUNCTIONAL_TESTS_PLAN.md L4-L6, L11)
+NO_TAB = HOST.replace('tab item "P&ID  Exporter"', 'tab item "Insert"')
+NO_DOCUMENT = HOST.replace("[Drawing1.dwg]", "Start").replace('tab item "Drawing1"', 'tab item "Start"')
+
+
+def load_plan() -> TestPlan:  # ENV-000, INST-001, INST-002, LOAD-000, LOAD-001, UNIN-001
+    return add_built_in_tests(TestPlan.model_validate(load_plan_data()), FACTS, host_process("autocad-plant3d"))
+
+
+def ui_obs(run_dir, tid, snapshot: str | None, screenshot=True, **values):
+    evidence = []
+    (run_dir / "evidence").mkdir(exist_ok=True)
+    if snapshot is not None:
+        (run_dir / "evidence" / f"{tid}_Snapshot_ui.txt").write_text(snapshot, encoding="utf-8")
+        evidence.append(f"evidence/{tid}_Snapshot_ui.txt")
+    if screenshot:
+        evidence.append(f"evidence/{tid}_Screenshot_1.png")
+    o = obs(tid, **values)
+    return o.model_copy(update={"evidence": evidence})
+
+
+def load_results(tmp_path, load000_snapshot=HOST, load001_snapshot=HOST, screenshot=True, **load001_values):
+    o000 = ui_obs(tmp_path, "LOAD-000", load000_snapshot, host_started=True, document_opened=True,
+                  error_dialog_seen=False, load_prompt_seen=False)
+    o001 = ui_obs(tmp_path, "LOAD-001", load001_snapshot, screenshot=screenshot,
+                  **(load001_values or {"entry_point_label": "P&ID Exporter"}))
+    ui = UiContext(tmp_path, host_process("autocad-plant3d").main_window)
+    return {r.test_id: r for r in evaluate(load_plan(), happy() + [o000, o001], set(), ui)}
+
+
+def test_load_tests_pass_from_the_ui_tree(tmp_path):
+    r = load_results(tmp_path)
+    assert r["LOAD-000"].status is Status.PASS and r["LOAD-001"].status is Status.PASS
+    assert r["UNIN-001"].status is Status.PASS  # UNIN never depends on LOAD
+
+
+def test_ui_tree_decides_not_agent2(tmp_path):
+    # Agent 2 said null / something else: the UI tree still decides (L5); its value is kept for the report
+    r = load_results(tmp_path, entry_point_label=None)["LOAD-001"]
+    assert r.status is Status.PASS and r.checks[0].reported is None and r.checks[0].observed == "seen"
+    assert load_results(tmp_path, load001_snapshot=NO_TAB, entry_point_label="P&ID Exporter")["LOAD-001"].status         is Status.NEEDS_REVIEW
+
+
+def test_label_missing_is_needs_review_with_screenshot_else_fail(tmp_path):
+    r = load_results(tmp_path, load001_snapshot=NO_TAB)["LOAD-001"]
+    assert r.status is Status.NEEDS_REVIEW and r.checks[0].needs_review and "screenshot" in r.notes
+    assert load_results(tmp_path, load001_snapshot=NO_TAB, screenshot=False)["LOAD-001"].status is Status.FAIL
+
+
+def test_no_host_window_or_no_snapshot_is_error(tmp_path):
+    assert load_results(tmp_path, load001_snapshot=REAL_OTHER_WINDOW)["LOAD-001"].status is Status.ERROR
+    r = load_results(tmp_path, load001_snapshot=None)["LOAD-001"]
+    assert r.status is Status.ERROR and "no Snapshot" in r.notes
+
+
+def test_window_in_ui_not_seen_is_fail_and_blocks_load001(tmp_path):
+    r = load_results(tmp_path, load000_snapshot=NO_DOCUMENT)
+    assert r["LOAD-000"].status is Status.FAIL
+    assert [c.key for c in r["LOAD-000"].checks if not c.ok] == ["document_opened"]
+    assert r["LOAD-001"].status is Status.BLOCKED
+
+
+def test_needs_review_blocks_dependents(tmp_path):
+    data = load_plan_data()
+    data["testcases"].insert(3, {**data["testcases"][2], "id": "LOAD-002", "preconditions": ["LOAD-001"]})
+    p = add_built_in_tests(TestPlan.model_validate(data), FACTS, host_process("autocad-plant3d"))
+    o000 = ui_obs(tmp_path, "LOAD-000", HOST, host_started=True, document_opened=True, error_dialog_seen=False)
+    o001 = ui_obs(tmp_path, "LOAD-001", NO_TAB, entry_point_label=None)
+    ui = UiContext(tmp_path, MAIN)
+    s = statuses(evaluate(p, happy() + [o000, o001], set(), ui))
+    assert s["LOAD-001"] is Status.NEEDS_REVIEW and s["LOAD-002"] is Status.BLOCKED
+
+
+def test_report_shows_needs_review_and_agent2_value(tmp_path):
+    for o in happy():
+        save_observation(tmp_path, o)
+    save_observation(tmp_path, ui_obs(tmp_path, "LOAD-000", HOST, host_started=True, document_opened=True,
+                                      error_dialog_seen=False, load_prompt_seen=True))
+    save_observation(tmp_path, ui_obs(tmp_path, "LOAD-001", NO_TAB, entry_point_label="P&ID Exporter"))
+    run = write_report(load_plan(), tmp_path)
+    assert run.counts["NEEDS_REVIEW"] == 1 and run.counts["PASS"] == 5
+    html = (tmp_path / "report.html").read_text(encoding="utf-8")
+    assert 'class="status NEEDS_REVIEW"' in html and "Agent 2 said" in html
+
+
+REAL_OTHER_WINDOW = HOST.replace("AutoCAD Plant 3D 2027 - [Drawing1.dwg]", "Notepad")
+
+
+def test_report_shows_host_crash_records(tmp_path):
+    from mpagent.execute.host import CRASH_EVENTS_FILE
+
+    (tmp_path / "evidence").mkdir()
+    (tmp_path / CRASH_EVENTS_FILE).write_text("[2026-10-13T17:50:46] Application Error\nFaulting module name: X.dll",
+                                              encoding="utf-8")
+    write_report(plan(), tmp_path)
+    html = (tmp_path / "report.html").read_text(encoding="utf-8")
+    assert "The host crashed during this run" in html and "Faulting module name: X.dll" in html

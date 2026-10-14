@@ -3,6 +3,8 @@
 1. The process is elevated (installers and the UI uninstall need admin; UAC can't be automated).
 2. Windows-MCP starts and exposes exactly the 13 allowed tools.
 3. ENV-000: the app is not installed yet (Uninstall entry by ProductCode, or DisplayName as a fallback).
+4. The host isn't running (FUNCTIONAL_TESTS_PLAN.md L12): a run would act in, and at the end kill, the
+   user's own session. Only for hosts whose notes have host_process.
 Any failure raises PreflightError; the pipeline then stops and Agent 2 doesn't start.
 """
 
@@ -13,13 +15,14 @@ from pathlib import Path
 
 from mpagent.config import Settings
 from mpagent.design.selfcheck import BUILT_IN_ENV_ID
+from mpagent.execute.host import running_pids
 from mpagent.execute.observations import save_observation
 from mpagent.execute.windows_mcp import (
     WindowsMcpError,
     check_tool_list,
     windows_mcp_server,
 )
-from mpagent.models import InstallerFacts, KeyValue, Observation
+from mpagent.models import HostProcess, InstallerFacts, KeyValue, Observation
 from mpagent.runlog import log
 
 UNINSTALL_KEYS = (
@@ -85,7 +88,7 @@ async def _check_mcp(settings: Settings) -> list[str]:
         return await check_tool_list(server)
 
 
-def run_preflight(run_dir: Path, facts: InstallerFacts, settings: Settings) -> None:
+def run_preflight(run_dir: Path, facts: InstallerFacts, settings: Settings, host: HostProcess | None = None) -> None:
     if not is_elevated():
         raise PreflightError("not running as administrator — start Visual Studio as administrator")
     log.info("  elevated: yes")
@@ -105,3 +108,10 @@ def run_preflight(run_dir: Path, facts: InstallerFacts, settings: Settings) -> N
         how = (f"in an administrator prompt run: msiexec /x {code} /qn" if facts.installer_type == "msi" and code
                else "use Control Panel > Programs and Features")
         raise PreflightError(f"app already installed ({obs.notes}) — uninstall it first ({how}), then run again")
+
+    if host is not None:
+        running = running_pids(host.processes)
+        if running:
+            which = ", ".join(f"{name} PID {pid}" for pid, name in sorted(running.items()))
+            raise PreflightError(f"the host is running ({which}) — close it and run again")
+        log.info("  host not running: yes")

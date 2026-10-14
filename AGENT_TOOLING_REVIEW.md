@@ -4,6 +4,8 @@
 **Status:** For team review. Mark each item ✅ keep / ❌ drop / ✏️ change in the **Decision** column. Claude finalizes the implementation list after the review.
 **Update 2026-10-13 (after live runs):** the points in Part C are now settled in code; see "Outcome" under each point and [`ARCHITECTURE.md`](ARCHITECTURE.md) D26–D39. In Part B, the "UNIN (UI path)" uses of App, Snapshot, Click, Type and Scroll no longer apply (the uninstall is silent); those tools stay allowed for the planned host/plug-in screenshot test.
 
+**Update 2026-10-13 (LOAD tests, ARCHITECTURE.md D47–D50):** **App** may only run `launch_executable` with the host's exact path and arguments (`launch` by Start menu name is rejected; `switch`/`resize` allowed; no host → nothing may be started). **Process kill** is allowed for msiexec and the host's processes, by name only. **Wait/WaitFor** are capped at 105 s (tool timeout − 15 s). An uninstall `msiexec /x` is rejected while a host process runs. **Snapshot** texts are saved in full as evidence and decide the LOAD checks.
+
 **Already decided (not up for review here):**
 - Generic architecture; the first host is AutoCAD Plant 3D 2027.
 - Enterprise **OpenAI API**, using the **OpenAI Agents SDK** (Python 3.12, uv).

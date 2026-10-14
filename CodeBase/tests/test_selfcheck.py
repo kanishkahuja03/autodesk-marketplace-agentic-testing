@@ -2,7 +2,7 @@
 
 import copy
 
-from plans import good_plan_data
+from plans import TAB_QUOTE, good_plan_data, load_plan_data
 
 from mpagent.design.evidence import Source
 from mpagent.design.selfcheck import check_plan, normalise
@@ -111,3 +111,97 @@ def test_env_tests_may_not_observe_app_install_keys():
     env["observe"] = ["host_installed"]
     env["expected"][0]["key"] = "host_installed"
     assert errors_for(changed(lambda d: d["testcases"].append(env))) == []
+
+
+# ---------------------------------------------------------------- LOAD rules (FUNCTIONAL_TESTS_PLAN.md §4.1)
+LOAD_SOURCES = SOURCES + [Source("D2", "UserGuide.txt", "After installation, " + TAB_QUOTE + ", which contains two "
+                                                        "new buttons.\nThe “Export” button is used to export.")]
+
+
+def load_errors(edit=lambda d: None, load_hosts=("autocad-plant3d",)) -> list[str]:
+    data = copy.deepcopy(load_plan_data())
+    edit(data)
+    return check_plan(TestPlan.model_validate(data), LOAD_SOURCES, HOSTS, load_hosts)
+
+
+def _load001(d: dict) -> dict:
+    return next(t for t in d["testcases"] if t["id"] == "LOAD-001")
+
+
+def test_good_load_plan_passes():
+    assert load_errors() == []
+    assert load_errors(lambda d: d["summary"]["entry_point"].update(items=["Export"])) == []
+
+
+def test_load_needs_a_host_with_host_process():
+    assert any("no LOAD support" in e for e in load_errors(load_hosts=()))
+
+
+def test_entry_point_names_must_be_quoted():
+    # the user guide names only "Export"; "Info" is not in the documents
+    errors = load_errors(lambda d: d["summary"]["entry_point"].update(items=["Export", "Info"]))
+    assert any("'Info' is not in any quote" in e for e in errors)
+
+
+def test_load_test_shape_rules():
+    # a command or own window isn't visible right after start; no entry point at all can't be checked either
+    for edit in (lambda d: d["summary"]["entry_point"].update(kind="command"),
+                 lambda d: d["summary"].update(entry_point=None)):
+        assert any("needs summary.entry_point with kind" in e for e in load_errors(edit))
+    assert any("exactly ['LOAD-000']" in e for e in load_errors(lambda d: _load001(d).update(preconditions=["INST-001"])))
+    assert any("must equal summary.entry_point.label" in e
+               for e in load_errors(lambda d: _load001(d)["expected"][0].update(value="Exporter")))
+
+    def two(d):
+        d["testcases"].insert(3, {**_load001(d), "id": "LOAD-002"})
+    assert any("at most one LOAD test" in e for e in load_errors(two))
+
+
+def test_load000_is_reserved_and_ui_checks_only_in_load():
+    def write_load000(d):
+        _load001(d)["id"] = "LOAD-000"
+    assert any("LOAD-000 is reserved" in e for e in load_errors(write_load000))
+
+    def ui_check_in_inst(d):
+        d["testcases"][1]["expected"][0].update(check="window_in_ui", value="x")
+    assert any("only for LOAD tests" in e for e in load_errors(ui_check_in_inst))
+
+    def window_in_ui(d):
+        _load001(d)["expected"][0].update(check="window_in_ui")
+    assert any("reserved for the built-in LOAD-000" in e for e in load_errors(window_in_ui))
+
+
+def test_unin_may_not_depend_on_load():
+    def depend(d):
+        d["testcases"][-1]["preconditions"].append("LOAD-000")
+    assert any("never on LOAD" in e for e in load_errors(depend))
+
+
+# ---------------------------------------------------------------- citation fixes from run 20261013-172934
+def test_misplaced_quote_says_which_source_has_it():
+    data = changed(lambda d: d["app"]["host_evidence"][0].update(doc="F1"))  # the quote is really in D1
+    errors = errors_for(data)
+    assert any("this text is in D1, not F1: set doc to D1" in e for e in errors)
+    assert any("(copy the text exactly)" in e
+               for e in errors_for(changed(lambda d: d["app"]["host_evidence"][0].update(quote="invented text"))))
+
+
+def test_quote_mark_kinds_inside_a_quote_do_not_matter():
+    # the user guide has “P&ID Exporter”; the model wrote 'P&ID Exporter' and ‘P&ID Exporter’
+    for variant in ("'P&ID Exporter'", "‘P&ID Exporter’", '"P&ID Exporter"'):
+        quote = TAB_QUOTE.replace("“P&ID Exporter”", variant)
+        assert load_errors(lambda d, q=quote: d["summary"]["entry_point"]["sources"][0].update(quote=q)) == []
+    assert any("quote not found" in e for e in load_errors(
+        lambda d: d["summary"]["entry_point"]["sources"][0].update(quote=TAB_QUOTE.replace("new tab", "new ribbon"))))
+
+
+def test_load001_is_required_for_a_visible_entry_point():
+    def drop(d):
+        d["testcases"] = [t for t in d["testcases"] if t["id"] != "LOAD-001"]
+    assert any("write the LOAD test LOAD-001" in e for e in load_errors(drop))
+
+    def drop_command(d):
+        drop(d)
+        d["summary"]["entry_point"]["kind"] = "command"
+    assert load_errors(drop_command) == []  # not visible after start: no LOAD test needed
+    assert load_errors(drop, load_hosts=()) == []  # host without host_process

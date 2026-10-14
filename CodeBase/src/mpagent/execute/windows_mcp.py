@@ -6,6 +6,7 @@ Windows-MCP's own --tools flag and the Agents SDK tool filter.
 
 import base64
 import html
+import os
 import re
 import shutil
 from pathlib import Path
@@ -13,6 +14,7 @@ from pathlib import Path
 from agents.mcp import MCPServerStdio, create_static_tool_filter
 
 from mpagent.config import Settings
+from mpagent.execute.ui_tree import decode
 from mpagent.runlog import log
 
 # Version installed with `uv tool install windows-mcp==0.8.6` (README setup step).
@@ -22,6 +24,20 @@ ALLOWED_TOOLS: tuple[str, ...] = (
     "PowerShell", "Registry", "FileSystem", "Process", "App",
     "Snapshot", "Click", "Type", "Shortcut", "WaitFor", "Wait", "Screenshot", "Scroll",
 )
+
+
+# The MCP SDK starts a stdio server with only 12 environment variables, and every program Windows-MCP starts
+# inherits that. Without ProgramData, ProgramFiles, CommonProgramFiles, … a host can crash at start (runs
+# 20261013-175002 and -184220: acad.exe in ODISSDK.dll, reproduced with the SDK's environment). So the server
+# gets this process's normal environment, minus anything that looks like a secret.
+SECRET_ENV = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|COOKIE", re.IGNORECASE)
+
+
+def server_env(environ: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment for the Windows-MCP server: the normal one without secrets (API keys never reach
+    Windows-MCP or the programs it starts)."""
+    environ = dict(os.environ if environ is None else environ)
+    return {k: v for k, v in environ.items() if not SECRET_ENV.search(k)}
 
 
 class WindowsMcpError(Exception):
@@ -45,7 +61,8 @@ def windows_mcp_server(settings: Settings, recorder: "CallRecorder | None" = Non
     cls = RecordingMCPServer if recorder else MCPServerStdio
     server = cls(
         name="windows-mcp",
-        params={"command": find_command(settings), "args": ["serve", "--transport", "stdio", "--tools", ",".join(ALLOWED_TOOLS)]},
+        params={"command": find_command(settings), "args": ["serve", "--transport", "stdio", "--tools", ",".join(ALLOWED_TOOLS)],
+                "env": server_env()},
         tool_filter=create_static_tool_filter(allowed_tool_names=list(ALLOWED_TOOLS)),
         client_session_timeout_seconds=settings.agent2_tool_timeout_s,
         cache_tools_list=True,
@@ -57,8 +74,9 @@ def windows_mcp_server(settings: Settings, recorder: "CallRecorder | None" = Non
 
 
 class CallRecorder:
-    """Traces MCP calls and saves screenshots to evidence/. Screenshots taken since the last
-    record_observation call are handed over with take_pending() (ARCHITECTURE.md D31)."""
+    """Traces MCP calls and saves screenshots to evidence/, plus the full raw text of every Snapshot
+    (evidence/<n>_Snapshot_ui.txt) for the UI checks (FUNCTIONAL_TESTS_PLAN.md L17). Files saved since the
+    last record_observation call are handed over with take_pending() (ARCHITECTURE.md D31)."""
 
     def __init__(self, run_dir: Path, trace):
         self.evidence_dir = run_dir / "evidence"
@@ -70,9 +88,11 @@ class CallRecorder:
     def record(self, tool: str, arguments: dict | None, result, cleaned_chars: int | None = None) -> None:
         self.count += 1
         saved = save_images(result.content, self.evidence_dir, f"{self.count:03d}_{tool}")
+        text = " ".join(getattr(c, "text", "") for c in result.content if getattr(c, "type", None) == "text")
+        if tool == SNAPSHOT_TOOL and text:
+            saved.append(save_ui_text(text, self.evidence_dir, f"{self.count:03d}_{tool}"))
         rel = [p.relative_to(self.run_dir).as_posix() for p in saved]
         self.pending += rel
-        text = " ".join(getattr(c, "text", "") for c in result.content if getattr(c, "type", None) == "text")
         is_error = getattr(result, "is_error", getattr(result, "isError", None))
         self.trace.write("mcp_call", n=self.count, tool=tool, arguments=arguments, is_error=is_error,
                          text=text[:TRACE_TEXT_CHARS], text_chars=len(text), sent_to_model_chars=cleaned_chars,
@@ -81,6 +101,9 @@ class CallRecorder:
     def take_pending(self) -> list[str]:
         out, self.pending = self.pending, []
         return out
+
+    def has_pending_snapshot(self) -> bool:
+        return any(p.endswith(UI_TEXT_SUFFIX) for p in self.pending)
 
 
 class RecordingMCPServer(MCPServerStdio):
@@ -144,6 +167,18 @@ async def check_tool_list(server: MCPServerStdio) -> list[str]:
         missing = sorted(set(expected) - set(names))
         raise WindowsMcpError(f"tool list mismatch: extra={extra or '-'} missing={missing or '-'}")
     return names
+
+
+SNAPSHOT_TOOL = "Snapshot"
+UI_TEXT_SUFFIX = "_ui.txt"
+
+
+def save_ui_text(text: str, evidence_dir: Path, prefix: str) -> Path:
+    """Save a Snapshot's full raw text (decoded if Windows-MCP returned it as a JSON list); never cut off."""
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    path = evidence_dir / f"{prefix}{UI_TEXT_SUFFIX}"
+    path.write_text(decode(text), encoding="utf-8")
+    return path
 
 
 def save_images(content: list, evidence_dir: Path, prefix: str) -> list[Path]:

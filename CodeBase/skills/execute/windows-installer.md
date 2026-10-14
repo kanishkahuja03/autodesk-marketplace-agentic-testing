@@ -70,7 +70,7 @@ Report `signature_status` (e.g. `Valid`, `NotSigned`, `HashMismatch`) and `signe
 The guardrail rejects `;`, `{ }` (except GUIDs), `$( )`, `&` outside quotes, redirection and line breaks, and allows pipes only into `Select-Object`, `Format-List`, `Format-Table`, `Sort-Object`, `Measure-Object`, `Out-String` or `ConvertTo-Json`. Keep commands to one line. Names that contain `&` (e.g. `P&ID`) are fine inside quotes.
 
 ## 7. UI rules (whenever a step needs the screen)
-- Start programs only with the App tool and a **full path**. **Never use Win+R / the Run dialog** or the Start menu search.
+- Start programs only with the App tool (`mode="launch_executable"`) and the exact path and arguments your input gives ("Host program"). **Never use Win+R / the Run dialog** or the Start menu search. No other program may be started.
 - **Never click or type at guessed coordinates.** Call `Snapshot` first and use the element `label` it gives.
 - **Never click, type into or close the console window** titled `…cmd.exe` or `…python…`: it's the test pipeline itself.
 - If the same action failed twice, stop trying it: record what you saw (`executed: false`) and move on.

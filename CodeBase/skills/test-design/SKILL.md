@@ -1,6 +1,6 @@
 ---
 name: test-design
-description: Rules Agent 1 follows to turn an app's documents and installer facts into a cited, machine-checkable test plan (ENV, INST, UNIN) for Agent 2. Used by Agent 1 only.
+description: Rules Agent 1 follows to turn an app's documents and installer facts into a cited, machine-checkable test plan (ENV, INST, LOAD, UNIN) for Agent 2. Used by Agent 1 only.
 ---
 
 # Test design (Agent 1)
@@ -24,13 +24,14 @@ Set `app.host_id` to:
 
 Put the quotes that justify your choice in `app.host_evidence` (empty only for `unknown`). Prefer installer facts (F1) over marketing text.
 
-## 3. What to test (demo scope: ENV, INST, UNIN)
+## 3. What to test (ENV, INST, LOAD, UNIN)
 Test **the app**, its installation, registration and removal. Never test the host application's own features or APIs.
 
 | Category | Cover (when the evidence supports it) |
 |---|---|
 | **ENV** | The host is installed and its version is one the app supports; folders the app needs exist; OS facts the docs require (e.g. 64-bit). Skip host tests when `host_id` is `none`. |
 | **INST** | Silent install finishes; a Programs and Features (Uninstall) entry appears with the expected name and version; the expected files and folders exist; the installer's signature is valid and the signer matches the claimed publisher. |
+| **LOAD** | The app's entry point is visible in its host after the host starts (section 4a). Only for hosts whose notes have a `host_process` block. |
 | **UNIN** | Silent uninstall finishes (observe `uninstall_exit_code`, expected `in` `["0", "3010"]`); the Uninstall entry is removed; the installed files and folders are gone. |
 
 **Required in every plan** (the self-check rejects the plan otherwise), with exactly these keys:
@@ -40,9 +41,25 @@ Test **the app**, its installation, registration and removal. Never test the hos
 
 **Do not write** the "app is not already installed" check. It is the built-in test `ENV-000`, run by code before Agent 2 starts. You may use `ENV-000` in `preconditions`.
 
+**Do not write** the "host starts and opens a new document" check either. It is the built-in test `LOAD-000`, added by code for hosts with `host_process`.
+
+## 4a. LOAD: the app's entry point
+1. Fill `summary.entry_point` from the documents, or set it to `null` if they don't say where the app appears in its host:
+   - `kind`: `ribbon_tab` (a **tab** in the host's ribbon, even if the docs just say "a new tab"), `menu`, `toolbar` (a toolbar of buttons, not a tab), `command` (a typed command) or `own_window` (a window the app opens);
+   - `label`: the exact name the UI shows (e.g. the tab's name), **copied from a source**;
+   - `items`: buttons or commands inside it, **only names that a source quotes**. If a source counts items without naming them all (e.g. "two new buttons" with one named), list the named ones and add an open question;
+   - `use_context`: what must be open to *use* the app, as the documents say (e.g. a kind of project or document), or `null`. This is for later feature tests; LOAD doesn't need it;
+   - `sources`: the quotes for the label, items and use_context (the self-check finds every name in them).
+2. Write **exactly one** LOAD test, `LOAD-001`, **whenever** the host has `host_process` and `kind` is `ribbon_tab`, `menu` or `toolbar` (the self-check rejects the plan without it). These are visible right after the host starts. For `command` or `own_window`, write no LOAD test and add an open question ("entry point is a command; checked by later feature tests").
+   - `preconditions`: exactly `["LOAD-000"]`;
+   - `observe`: `["entry_point_label"]`;
+   - `expected`: exactly one check, `{key: entry_point_label, check: seen_in_ui, value: <the label>}`;
+   - `steps`: e.g. "With the new document open, take a Snapshot and look for the <kind> '<label>'; don't click it".
+3. UNIN tests never depend on LOAD tests: the uninstall is always tested.
+
 ## 4. How to write a test
-- `id`: `ENV-001`, `INST-001`, `UNIN-001`, … unique, three digits. `origin`: always `agent`.
-- `source`: one citation `{doc, line, quote}`. The `quote` must be **copied exactly** from that source (a short phrase is best). Code checks it.
+- `id`: `ENV-001`, `INST-001`, `LOAD-001`, `UNIN-001`, … unique, three digits. `origin`: always `agent`.
+- `source`: one citation `{doc, line, quote}`. The `quote` must be **copied exactly** from that source (a short phrase is best, never shortened with "…"), and `doc` must be the source the text is in. Code checks both.
 - `preconditions`: IDs of tests that must PASS first. INST tests depend on `ENV-000`; tests that need the host depend on the host ENV test; UNIN tests depend on the install test.
 - `steps`: plain-language **intents** for Agent 2, not commands. Good: "Install ${INSTALLER_PATH} silently with a verbose log". Bad: a PowerShell script.
 - `observe`: snake_case keys Agent 2 must report. Pick keys that describe **what the test is about**:
@@ -60,6 +77,7 @@ Test **the app**, its installation, registration and removal. Never test the hos
 | `exists` / `not_exists` | a file, folder, key or entry is present / absent | none |
 | `contains` | text contains a substring (signer name) | `value` |
 | `matches` | text matches a regular expression | `value` |
+| `seen_in_ui` | LOAD only: an element with exactly this name is in the host window (decided by code from the UI tree) | `value` |
 
 Set unused fields to `null`.
 - `priority`: `P1` (must work), `P2` (should work), `P3` (nice to have).
@@ -77,4 +95,4 @@ Windows variables such as `%AppData%` or `%ProgramFiles%` may be used as they ar
 If the evidence doesn't say something (a version, a file name, a command), leave it out or use `null`, and add an **open question** to `summary.open_questions`. A short correct plan is better than a long invented one. Also list notable conflicts between sources (e.g. the description says per-user, the installer says per-machine) as open questions.
 
 ## 7. Summary (shown to humans as understanding.md)
-`purpose` in 1–3 sentences; `install_footprint` (where files and entries go); `commands_or_ui` (commands, ribbon tabs, menus the app adds); `open_questions`.
+`purpose` in 1–3 sentences; `install_footprint` (where files and entries go); `commands_or_ui` (commands, ribbon tabs, menus the app adds); `entry_point` (section 4a); `open_questions`.

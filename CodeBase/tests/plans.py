@@ -15,7 +15,7 @@ def good_plan_data() -> dict:
                           "product_code": "{DFA9AB30-EDDB-4E96-BFF7-086145A9E483}", "signer_claimed": "Kleen Software GmbH"},
         },
         "summary": {"purpose": "Exports P&ID symbols to an interface file.", "install_footprint": [],
-                    "commands_or_ui": [], "open_questions": []},
+                    "commands_or_ui": [], "entry_point": None, "open_questions": []},
         "required_env": ["INSTALLER_PATH"],
         "testcases": [
             _test("INST-001", "INST", "properties.ProductName = P&ID Connector Exporter Plant3D", [],
@@ -51,3 +51,21 @@ def fake_ask(*plans: dict):
 
     ask.calls = calls
     return ask
+
+
+TAB_QUOTE = "you will receive a new tab called “P&ID Exporter”"  # real UserGuide.txt text (D2)
+
+
+def load_plan_data() -> dict:
+    """good_plan_data() plus the entry-point card and LOAD-001 (FUNCTIONAL_TESTS_PLAN.md §4.1)."""
+    data = good_plan_data()
+    data["summary"]["entry_point"] = {
+        "kind": "ribbon_tab", "label": "P&ID Exporter", "items": [], "use_context": None,
+        "sources": [{"doc": "D2", "line": 7, "quote": TAB_QUOTE}]}
+    load = _test("LOAD-001", "LOAD", "", ["LOAD-000"],
+                 ["With the new document open, take a Snapshot and look for the ribbon tab 'P&ID Exporter'"],
+                 ["entry_point_label"],
+                 [{"key": "entry_point_label", "check": "seen_in_ui", "value": "P&ID Exporter", "values": None}])
+    load["source"] = {"doc": "D2", "line": 7, "quote": TAB_QUOTE}
+    data["testcases"].insert(2, load)
+    return data

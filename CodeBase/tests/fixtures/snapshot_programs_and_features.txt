@@ -1,0 +1,40 @@
+    UI Tree:
+    desktop
+    ├── window "Programs and Features"
+    │   ├── tool bar "Up band"
+    │   │   └── (186,154) button "Up to "Programs" (Alt + Up Arrow)"  [action: click]
+    │   ├── tool bar "Address: Control Panel\Programs\Programs and Features"
+    │   │   ├── (231,153) split button "All locations"  [action: click]
+    │   │   ├── (296,153) split button "Control Panel"  [action: click]
+    │   │   ├── (381,153) split button "Programs"  [action: click]
+    │   │   └── (482,153) menu item "Programs and Features"  [action: click]
+    │   ├── tool bar "Address band"
+    │   │   ├── (915,154) button "Previous Locations"  [action: click]
+    │   │   └── (949,154) button "Refresh "Programs and Features" (F5)"  [action: click]
+    │   ├── (1064,153) edit "Search Box"  [action: fill]
+    │   ├── (1161,154) button "Search"  [action: click]
+    │   ├── pane "Programs and Features"
+    │   │   ├── (153,203) link "Control Panel Home"  [action: click]
+    │   │   ├── (157,239) link "View installed updates"  [action: click]
+    │   │   ├── (84,263) link "Icon"  [action: click]
+    │   │   ├── (177,270) link "Turn Windows features on or off"  [action: click]
+    │   │   ├── tool bar "Command Module"
+    │   │   │   ├── (1170,285) button "&Help"  [action: click]
+    │   │   │   ├── (1138,285) button "View Slider"  [action: click]
+    │   │   │   ├── (1124,285) split button "Details"  [action: click]
+    │   │   │   └── (314,285) button "Organise"  [action: click]
+    │   │   ├── (436,643) edit "Title"  [action: fill]  [value:"Currently installed programs"]
+    │   │   ├── (436,661) edit "Subtitle"  [action: fill]  [value:"58 programs installed"]
+    │   │   ├── group "Metadata Row"
+    │   │   │   └── (884,643) edit "Total size"  [action: fill]  [value:"27.5 GB"]
+    │   │   └── pane "Shell Folder View"
+    │   │       ├── (674,313) header item "Split Button"  [action: click]
+    │   │       ├── (477,313) split button "Name"  [action: click]
+    │   │       ├── (866,313) header item "Split Button"  [action: click]
+    │   │       ├── (780,313) split button "Publisher"  [action: click]
+    │   │       ├── (946,313) header item "Split Button"  [action: click]
+    │   │       ├── (916,313) split button "Installed On"  [action: click]
+    │   │       ├── (1026,313) header item "Split Button"  [action: click]
+    │   │       ├── (996,313) split button "Size"  [action: click]
+    │   │       ├── (1154,313) header item "Split Button"  [action: click]
+    │   │       ├── (1100,313) split button "Version"  [action: click]

@@ -79,7 +79,7 @@ def load_settings() -> Settings:
         openai_model=os.environ.get("OPENAI_MODEL") or None,
         agent2_max_turns=_int("AGENT2_MAX_TURNS", 150),
         agent2_tool_timeout_s=_int("AGENT2_TOOL_TIMEOUT_S", 120),
-        agent2_timeout_min=_int("AGENT2_TIMEOUT_MIN", 20),
+        agent2_timeout_min=_int("AGENT2_TIMEOUT_MIN", 40),
         windows_mcp_command=os.environ.get("WINDOWS_MCP_COMMAND") or "windows-mcp",
         runs_dir=PROJECT_ROOT / "runs",
         gemini_api_key=os.environ.get("GEMINI_API_KEY") or None,

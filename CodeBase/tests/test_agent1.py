@@ -108,3 +108,23 @@ def test_env000_uses_product_code(facts):
     plan = add_built_in_tests(TestPlan.model_validate(good_plan_data()), facts)
     assert "{DFA9AB30-EDDB-4E96-BFF7-086145A9E483}" in plan.testcases[0].steps[0]
     assert plan.testcases[0].expected[0].check.value == "not_exists"
+
+
+def test_load000_is_added_for_hosts_with_host_process(facts):
+    from plans import load_plan_data
+
+    from mpagent.hostnotes import host_process
+
+    hp = host_process("autocad-plant3d")
+    plan = add_built_in_tests(TestPlan.model_validate(load_plan_data()), facts, hp)
+    assert [t.id for t in plan.testcases] == ["ENV-000", "INST-001", "INST-002", "LOAD-000", "LOAD-001", "UNIN-001"]
+    load000 = plan.testcases[3]
+    assert load000.origin is Origin.BUILT_IN and load000.source is None
+    assert load000.preconditions == ["INST-001"]  # only the INST test observing install_exit_code
+    checks = {e.key: (e.check.value, e.value) for e in load000.expected}
+    assert checks == {"host_started": ("window_in_ui", hp.main_window),
+                      "document_opened": ("window_in_ui", hp.new_document),
+                      "error_dialog_seen": ("not_exists", None)}
+    assert "load_prompt_seen" in load000.observe  # reported, not checked
+    no_host = add_built_in_tests(TestPlan.model_validate(good_plan_data()), facts)
+    assert "LOAD-000" not in [t.id for t in no_host.testcases]

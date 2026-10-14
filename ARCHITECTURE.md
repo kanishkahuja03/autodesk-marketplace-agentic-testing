@@ -1,6 +1,6 @@
 # Architecture V2: Generic Plug-in / App Validation Agents
 
-> **Status:** v2.2, 2026-10-13. This is the build plan for the product. v2.1 added the grill-me decisions D16–D35 (one F5 run, preflight, cleanup, logging, guardrails, `record_observation`). **v2.2** records what the live runs of 2026-10-12/13 taught (D24, D26, D27, D30, D32, D33 updated; D36–D39 new): silent uninstall instead of the UI, read-only FileSystem, per-run guardrail rules, cleaned and capped tool results, app facts in Agent 2's input. First clean run: `20261013-152426` (3 PASS).
+> **Status:** v2.2, 2026-10-13. This is the build plan for the product. v2.1 added the grill-me decisions D16–D35 (one F5 run, preflight, cleanup, logging, guardrails, `record_observation`). **v2.2** records what the live runs of 2026-10-12/13 taught (D24, D26, D27, D30, D32, D33 updated; D36–D39 new): silent uninstall instead of the UI, read-only FileSystem, per-run guardrail rules, cleaned and capped tool results, app facts in Agent 2's input. First clean run: `20261013-152426` (3 PASS). **v2.3** (2026-10-13, branch `Dev-FunctionalTest`) adds the **LOAD** test level from the grill-me review of [`FUNCTIONAL_TESTS_PLAN.md`](FUNCTIONAL_TESTS_PLAN.md) (D8, D29, D35 updated; D40–D55 new).
 > **Supersedes:** [`ARCHITECTURE_old1.md`](ARCHITECTURE_old1.md) (v0.3). Where they disagree, **this document wins**, including over what is already in `CodeBase/`.
 > **Inputs to this version:** [`ARCHITECTURE_COMPARISON.md`](ARCHITECTURE_COMPARISON.md) (ours vs `AppStore automation/`), [`AGENT_TOOLING_REVIEW.md`](AGENT_TOOLING_REVIEW.md) (tool lists, one by one), [`DESKTOP_UI_AUTOMATION_RESEARCH.md`](DESKTOP_UI_AUTOMATION_RESEARCH.md). Decision index: [`ADR.md`](ADR.md).
 
@@ -32,8 +32,8 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 | D4 | Agent 1 | **Blind, single pass.** No tools, no machine access. Output: `understanding.md` + `testcases.yaml`. |
 | D5 | Agent 2 | **One agent session for the whole plan**, driving the machine **only through Windows-MCP**. No action catalogue of our own. The single local exception is the reporting tool `record_observation` (D30). |
 | D6 | UI interaction | **[Windows-MCP](https://github.com/CursorTouch/Windows-MCP)** (reads the accessibility tree, then clicks, types and takes screenshots) |
-| D7 | Verdict | **Code** compares observed values with expected ones. The LLM never sets PASS/FAIL. |
-| D8 | Demo test levels | **ENV, INST, UNIN** (LOAD and FUNC later) |
+| D7 | Verdict | **Code** compares observed values with expected ones. The LLM never sets PASS/FAIL. For LOAD, code reads the Snapshot UI tree itself (D44). |
+| D8 | Demo test levels | **ENV, INST, LOAD, UNIN** (LOAD added in v2.3, D40–D52; FUNC later) |
 | D9 | Human review gate | **None.** Fully automatic. |
 | D10 | Doc extraction | **Keep the existing `intake.py`** (pypdf, python-docx, bs4) |
 | D11 | Tracing | **Local only.** OpenAI tracing disabled. See D19 for the log files. |
@@ -59,13 +59,13 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 | D26 | Install path | **Silent** `Start-Process -FilePath msiexec.exe -ArgumentList '/i',<msi>,'/qn','/norestart','/l*v',<run>\evidence\install.log -Wait`. There's no UI install and no automatic UI retry. Code **creates `evidence\` before Agent 2 starts** (otherwise msiexec can't open its log and aborts at once). Agent 2 runs the install **once** (enforced by D32) and takes `install_exit_code` from the log's `success or error status: N` line (via `Select-String`), never from PowerShell's own status code; no log or no result line → `null`. `-PassThru \| Select-Object -ExpandProperty ExitCode` is not used: inside Windows-MCP it always fails ("Process must exit before requested information can be determined"). *(Runs 20261012-191028, 20261013-131217.)* |
 | D27 | Uninstall path | **Silent**, like the install: Agent 2 runs `msiexec /x <ProductCode> /qn /norestart /l*v <run>\evidence\uninstall.log` once, takes `uninstall_exit_code` from the log's `success or error status: N` line, then re-checks the Uninstall entry and the files. *(Changed 2026-10-13: the Programs and Features UI path made gpt-4o-mini scroll a 58-program list and select the wrong program — run 20261013-132121 had GlobalProtect selected with Uninstall clicked. The UI is kept for the host/plug-in screenshot test planned next.)* |
 | D28 | Cleanup (code, `finally`) | Always runs at the end. If the ProductCode is known **and** the Uninstall entry still exists **and** UNIN didn't complete → `msiexec /x {ProductCode} /qn`, logged as `CLEANUP`. It **never changes a verdict**. Non-MSI → logs "manual cleanup needed". |
-| D29 | Time limits | Agent 2: **150 turns**, **120 s per tool call**, **20 min total** (all in `.env`). If a limit is hit → the run is cancelled, missing tests become ERROR, cleanup runs, and it's logged. |
+| D29 | Time limits | Agent 2: **150 turns**, **120 s per tool call**, **40 min total** (raised from 20 for LOAD; all in `.env`; waits capped by D50). If a limit is hit → the run is cancelled, missing tests become ERROR, cleanup runs, and it's logged. |
 | D30 | Observations | Agent 2 reports **per test, as it goes**, through the local tool **`record_observation(test_id, observed, evidence, notes)`**. It appends to `observations.json` and never touches the machine. It **rejects evidence files that don't exist** in the run folder (Agent 2 must then record again with real files and only values it actually saw). An observation recorded with `executed: true` **can't be replaced** by a later `executed: false` one, and an identical repeat is answered "already recorded" instead of being saved again. The final agent output is only a short "done" plus the resolved env values. *(Run 20261013-125224: good results were overwritten by later failed attempts.)* |
 | D31 | Screenshots | Our trace hook **saves every Windows-MCP screenshot** to `evidence/`, and code **attaches every screenshot taken since the previous `record_observation` call to the next one** automatically. Agent 2 lists only other evidence files (e.g. `evidence/install.log`). *Verified on Windows-MCP 0.8.6: `Screenshot` returns the PNG inline as base64 (plus a text block with the cursor position and coordinate scale) and saves no file, so our code must save it (`execute/windows_mcp.py: save_images`).* |
 | D32 | PowerShell control | A code guardrail with an **allow-list of command starts**: `Start-Process -FilePath msiexec.exe` (with `-Wait`; a bare `msiexec` call returns before the install finishes), `Get-AuthenticodeSignature`, `Get-ItemProperty`, `Get-ChildItem`, `Test-Path`, `Select-String` (read-only search, e.g. the result line of a msiexec log), `Get-CimInstance Win32_OperatingSystem`, and the admin check. The command may not contain `;`, `\|\|`, `{ }` (except GUIDs), `$( )`, backticks, redirection or line breaks, nor `&` **outside quotes** (inside quotes it's text, e.g. `'P&ID Connector'`). Pipes may only go into output-shaping commands (`Select-Object`, `Format-List`, `Format-Table`, `Sort-Object`, `Measure-Object`, `Out-String`, `ConvertTo-Json`). Everything else is **rejected and logged**. |
 | D33 | Registry / FileSystem control | Code guardrail: Registry **read/list only**. FileSystem is **read-only**: `read`, `list`, `search`, `info`; `write`, `copy`, `move` and `delete` are always rejected (Agent 2 reports through `record_observation`; evidence comes from the tools). A `read` without `limit` of a file over **50 KB** is rejected (use `Select-String` or `offset`/`limit`). Rejections are logged and the agent is told why. *(Run 20261013-145150: Agent 2 overwrote the real `install.log` with its own sentence; run 20261013-131217: a whole-file read of a 354 KB log overflowed the model's context.)* |
 | D34 | Model | **One `OPENAI_MODEL`** for both agents (the strongest model available to the org). |
-| D35 | Run result | The final `run.log` line is `COMPLETED: n PASS, n FAIL, n BLOCKED, n ERROR — report: …` or `STOPPED: <reason>`. **Exit code:** 0 = completed (even with FAIL tests), 1 = stopped, 2 = unexpected crash. |
+| D35 | Run result | The final `run.log` line is `COMPLETED: n PASS, n FAIL, n NEEDS_REVIEW, n BLOCKED, n ERROR — report: …` or `STOPPED: <reason>`. **Exit code:** 0 = completed (even with FAIL tests), 1 = stopped, 2 = unexpected crash. |
 
 ### 2.3 Lessons from live runs (D36–D39, 2026-10-13)
 
@@ -75,6 +75,29 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 | D37 | Tool results sent to the model | Code cleans every Windows-MCP result before the model sees it: PowerShell **CLIXML progress noise is removed** and its error lines are decoded ("(PowerShell error output)"), and any text **over 20,000 characters is cut off** with a hint to use `Select-String` or `offset`/`limit`. The original result still goes to `trace.jsonl`. |
 | D38 | App facts for Agent 2 | Code adds an **"App under test"** block to Agent 2's input: DisplayName, Publisher, Version, ProductCode, the three Uninstall registry paths with the ProductCode, the install roots expanded to real paths, and the machine's real folders (`%APPDATA%`, `%LOCALAPPDATA%`, `%USERPROFILE%`, `%ProgramFiles%`, …). Execution side only, so Agent 1 stays blind. *(Run 20261013-132121 guessed `C:\Users\Admin`, `C:\Users\User`.)* |
 | D39 | Stopping a run | **Ctrl+C in the console** interrupts Agent 2, and the `finally` steps (cleanup, verdicts, report) still run; the log then ends without a COMPLETED/STOPPED line. The VS **Stop** button or closing the console kills the process, so cleanup can't run; the next run then stops at ENV-000 and prints the exact `msiexec /x {ProductCode} /qn` command to remove the leftover. |
+
+### 2.4 LOAD tests (D40–D55, grill-me review of FUNCTIONAL_TESTS_PLAN.md, 2026-10-13)
+
+LOAD checks that the plug-in is **loaded by its host**: the host starts, opens a new document, and the app's entry point is visible. Details and reasoning: [`FUNCTIONAL_TESTS_PLAN.md`](FUNCTIONAL_TESTS_PLAN.md) §3 (L1–L18).
+
+| # | Topic | Decision |
+|---|---|---|
+| D40 | What LOAD opens | The host plus its **default new document** (host-notes recipe). App-specific documents and projects are FUNC (later); Agent 1 records them as `entry_point.use_context`. |
+| D41 | Who writes LOAD tests | Code adds the built-in **LOAD-000** "host ready with a new document" for hosts whose notes have `host_process`; it depends on the INST test(s) observing `install_exit_code`. Agent 1 writes **exactly one** test, **LOAD-001** "entry point visible" (cited, precondition `[LOAD-000]`), whenever the entry point is visible (`ribbon_tab`, `menu`, `toolbar`); the self-check requires it (run 20261013-172934). |
+| D42 | Entry-point card | `summary.entry_point` (nullable): `kind`, `label`, `items` (only quoted names), `use_context`, `sources`. The self-check finds every name in the cited quotes. LOAD-001 checks the **label only**. |
+| D43 | Host facts for code | Each host-notes file may have YAML front matter **`host_process`**: registry lookup of the install folder, executable, exact args, process names, main-window and new-document title regexes. Read by `mpagent/hostnotes.py`; no product names in code. |
+| D44 | UI checks | New checks **`window_in_ui`** (a title matching a regex inside the host window) and **`seen_in_ui`** (an element named exactly the label inside the host window). Code parses only the **UI Tree** of the raw Snapshot texts attached to the observation, only under the host's main window; Agent 2's value is shown in the report but never decides. |
+| D45 | NEEDS_REVIEW | New status: `seen_in_ui` label not found but a screenshot exists. Precedence BLOCKED → ERROR → FAIL → NEEDS_REVIEW → PASS. It isn't PASS, so dependents are BLOCKED. No host window or no Snapshot → ERROR; `window_in_ui` not seen → FAIL. |
+| D46 | Raw Snapshot evidence | The recorder saves every Snapshot's **full** text as `evidence/<n>_Snapshot_ui.txt` (decoded if Windows-MCP returns a JSON list) and attaches it like screenshots. `record_observation` refuses an executed UI-checked test without a Snapshot since the previous record. |
+| D47 | One session | Agent 2 stays **one session** (D5). A guardrail **rejects an uninstall `msiexec /x` while a host process runs**, so locked plug-in files can't spoil UNIN. UNIN never depends on LOAD. |
+| D48 | Starting programs | The App tool may run only **`launch_executable` with the host's exact path and args** (path resolved by code, given in "Host program"); `launch` by name is rejected; `switch`/`resize` allowed. Without a host, App starts nothing. |
+| D49 | Dialogs | Generic rule: a prompt asking to load/trust/allow **the app under test** gets the **one-time yes**; never "Always …", never a settings change. Any other dialog stops LOAD. Accepted prompts are reported as `load_prompt_seen`. |
+| D50 | Closing and waiting | Agent 2 closes the host with **`Process kill` by name** (host processes allowed; kill by pid rejected); no saving, no graceful close. `Wait`/`WaitFor` are capped at tool timeout − 15 s (105 s). |
+| D51 | Host already running | **Preflight stops** if a host process runs, so no user session is touched. `finally` kills the host **before cleanup**: kill host → cleanup → verdicts → report. |
+| D52 | Host executable missing | If the registry lookup finds no executable, Agent 2 starts nothing and records LOAD as not executed. |
+| D53 | Order enforced by code | The App tool can't start the host before `msiexec /i` has run in this run, and `record_observation` refuses an executed test observing `install_exit_code` when the installer never ran. *(Run 20261013-175002: Agent 2 skipped the install, started the host and recorded INST-001 as executed with an invented cause.)* |
+| D54 | Host crashes | Agent 2 kills a host that crashed at start and starts it **once more**; a second crash is LOAD-000 `executed: true`, `error_dialog_seen: true` (FAIL). In `finally`, code saves Windows' crash records for the host's processes (Application Error, WER, .NET Runtime) to `evidence/host_crash_events.txt`, logs them, and the report shows them. *(Run 20261013-175002: Plant 3D crashed in `ODISSDK.dll` at start; the cause turned out to be D55.)* |
+| D55 | Windows-MCP environment | The MCP SDK starts a stdio server with only 12 environment variables, and every program Windows-MCP starts inherits them. Without `ProgramData`, `ProgramFiles`, `CommonProgramFiles`, … Plant 3D crashed in `ODISSDK.dll` on every pipeline start (runs 20261013-175002, -184220; reproduced with the SDK's environment). Code now passes the server **this process's normal environment, minus anything named like a secret** (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `AUTH`, `COOKIE`), so API keys never reach Windows-MCP or the host (`execute/windows_mcp.py: server_env`). |
 
 **Agent 2 resolves placeholders** (`${PLUGIN_DIR}` etc.) during its ENV tests and returns them in its final output.
 
@@ -97,24 +120,27 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
         │ testcases.yaml, understanding.md
  EXECUTION SIDE
         ▼
-   PREFLIGHT (code): elevated? · Windows-MCP = 13 tools? · ENV-000 plug-in not installed?
+   PREFLIGHT (code): elevated? · Windows-MCP = 13 tools? · ENV-000 plug-in not installed? · host not running?
         │                                                   └─ any fail → STOPPED (exit 1)
         ▼
    ┌──── AGENT 2: Test Executor (OpenAI + Windows-MCP) ──┐
    │ skills: windows-installer + evidence + hosts/<id>   │
-   │ one session: ENV → INST (silent) → UNIN (silent)    │──► record_observation → observations.json
+   │   (+ host-interaction when the plan has LOAD tests) │
+   │ one session: ENV → INST (silent) → LOAD (start host,│──► record_observation → observations.json
+   │   new document, Snapshot, kill host) → UNIN (silent)│
    │ guardrails: PowerShell allow-list, read-only,       │
-   │   install once, repeat limit; results cleaned/capped│
-   │ limits: 150 turns · 120 s/tool · 20 min             │
+   │   install once, repeat limit, host-only App launch, │
+   │   no uninstall while host runs; results capped      │
+   │ limits: 150 turns · 120 s/tool · 40 min             │
    └───────────────┬─────────────────────────────────────┘
                    │ MCP stdio (13 allowed tools)
                    ▼
             Windows-MCP ──► Windows + host app + plug-in
         │
         ▼
-   VERDICT ENGINE (code) → results.json → report.html
+   KILL HOST (code, finally) → CLEANUP (code, finally): msiexec /x only if still installed
         │
-   CLEANUP (code, finally): msiexec /x only if still installed and UNIN didn't complete
+   VERDICT ENGINE (code; LOAD from the raw Snapshot UI tree) → results.json → report.html
         │
    run.log: COMPLETED … / STOPPED …   (exit 0 / 1 / 2)
 ```
@@ -176,7 +202,7 @@ Runs right after Agent 1, before Agent 2. Each check logs one line in `run.log`.
 | Agent | `agents.Agent(name="test-executor", instructions=<skills>, mcp_servers=[windows_mcp], tools=[record_observation], model=$OPENAI_MODEL)` |
 | MCP server | `MCPServerStdio` launching the **pre-installed** Windows-MCP **0.8.6** (`windows-mcp serve --transport stdio --tools "<allow-list>"`, built in `execute/windows_mcp.py`), plus `tool_filter=create_static_tool_filter(allowed_tool_names=[…])`. Per-tool timeout: `AGENT2_TOOL_TIMEOUT_S` (120). |
 | Input message | The whole `testcases.yaml` (incl. ENV-000's result), the run folder path (where msiexec writes its logs), the installer path, and the **"App under test" block** (D38) |
-| Instructions | `skills/execute/windows-installer.md` + `skills/execute/evidence.md` + `skills/hosts/<host_id>.md` |
+| Instructions | `skills/execute/windows-installer.md` + `skills/execute/evidence.md` (+ `skills/execute/host-interaction.md` when the plan has LOAD tests) + `skills/hosts/<host_id>.md` |
 | Order | ENV (and resolve every `required_env` placeholder) → INST (**silent msiexec /i**, D26) → UNIN (**silent msiexec /x**, D27). Run every test; don't skip because of a precondition (D25). |
 | Reporting | Call **`record_observation`** right after each test (D30). The final output is only `{ done: true, env: {…} }`. |
 | Limits | `max_turns` 150; total wall-clock limit 20 min (`AGENT2_MAX_TURNS`, `AGENT2_TIMEOUT_MIN`) (D29) |
@@ -304,11 +330,12 @@ env: [{ key: HOST_INSTALL_DIR, value: 'C:\Program Files\Autodesk\AutoCAD 2027' }
 
 | File | Used by | Content |
 |---|---|---|
-| `skills/test-design/SKILL.md` | Agent 1 | The categories and what each must cover; the basic coverage required by D24 with the suggested key names (`install_exit_code`, `uninstall_entry_exists`); citation format; placeholders; `observe` / `expected` rules and allowed checks; preconditions; "never guess"; "test the plug-in, not the host"; "ENV-000 is built in, don't write it" |
-| `skills/hosts/autocad-plant3d.md` | Agents 1 + 2 | Plug-in folders (`%ProgramFiles%` / `%AppData%\Autodesk\ApplicationPlugins`), bundle + `PackageContents.xml`, version ↔ release numbers (2027 = R26.0), registry detection pattern, content folder default. **Knowledge only, never machine values.** |
+| `skills/test-design/SKILL.md` | Agent 1 | The categories and what each must cover; the basic coverage required by D24 with the suggested key names (`install_exit_code`, `uninstall_entry_exists`); citation format; placeholders; `observe` / `expected` rules and allowed checks; preconditions; "never guess"; "test the plug-in, not the host"; "ENV-000 is built in, don't write it"; LOAD: the entry-point card, LOAD-001 only for visible kinds, `seen_in_ui`, "LOAD-000 is built in" (D41, D42) |
+| `skills/hosts/autocad-plant3d.md` | Agents 1 + 2 | Plug-in folders (`%ProgramFiles%` / `%AppData%\Autodesk\ApplicationPlugins`), bundle + `PackageContents.xml`, version ↔ release numbers (2027 = R26.0), registry detection pattern, content folder default; `host_process` front matter for code (D43) and the LOAD sections (start, ready signal, dialogs, default new document, where entry points appear). **Knowledge only, never machine values.** |
 | `skills/hosts/none.md` | Agents 1 + 2 | Standalone Windows app: Program Files, Start menu, Programs & Features only |
 | `skills/execute/windows-installer.md` | Agent 2 | Allowed PowerShell commands (D32); read-only file rules and the 50 KB / 20,000-character limits (D33, D37); silent install and **silent uninstall** with logs, exit codes read from the logs (D26, D27); the three Uninstall registry paths; signature check; generic UI rules (full paths only, no Win+R, no guessed coordinates, never touch the console) |
 | `skills/execute/evidence.md` | Agent 2 | Call `record_observation` after every test; raw values only; reference saved screenshots and logs; untrusted-text rule; read-only rule; run every test |
+| `skills/execute/host-interaction.md` | Agent 2 | Generic LOAD steps: start the host only after a successful install, exact launch, the one-time load-prompt rule, default new document, Snapshot before each record, kill the host before UNIN (D47–D50) |
 
 A new host means **one new Markdown file**, with no code change.
 
@@ -331,7 +358,7 @@ A new host means **one new Markdown file**, with no code change.
 | Tests | pytest, ruff (existing) |
 | IDE | Visual Studio, **F5** = full run (`mpagent.pyproj` launch argument `inputs/<app>`) |
 
-**`.env`:** `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_AGENTS_DISABLE_TRACING=1`, `AGENT2_MAX_TURNS=150`, `AGENT2_TOOL_TIMEOUT_S=120`, `AGENT2_TIMEOUT_MIN=20`, `WINDOWS_MCP_COMMAND` (path/name of the installed Windows-MCP).
+**`.env`:** `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_AGENTS_DISABLE_TRACING=1`, `AGENT2_MAX_TURNS=150`, `AGENT2_TOOL_TIMEOUT_S=120`, `AGENT2_TIMEOUT_MIN=40`, `WINDOWS_MCP_COMMAND` (path/name of the installed Windows-MCP).
 
 **Dependency change:** remove `google-genai`, add `openai-agents` (+ `python-dotenv` if `.env` isn't already loaded).
 
@@ -346,7 +373,8 @@ CodeBase/
 │  ├─ pipeline.py               # NEW: S0 → S1 → Agent 1 → preflight → Agent 2 → verdict → report; finally cleanup; exit codes
 │  ├─ config.py                 # NEW: .env loading, model name, limits, MCP command
 │  ├─ runlog.py                 # NEW: run.log + console logging, trace.jsonl hooks, screenshot saving
-│  ├─ models.py                 # existing; + TestPlan, Observation, TestResult
+│  ├─ models.py                 # existing; + TestPlan, Observation, TestResult; + EntryPoint, HostProcess (v2.3)
+│  ├─ hostnotes.py              # BUILT (v2.3): host notes front matter → HostProcess (shared by design and execute)
 │  ├─ design/
 │  │  ├─ intake.py              # existing (keep)
 │  │  ├─ static_read.py, msi.py # existing (keep)
@@ -357,17 +385,20 @@ CodeBase/
 │  └─ execute/
 │     ├─ windows_mcp.py         # BUILT: pinned version, 13-tool allow-list, server factory, tool-list check, save_images,
 │     │                         #        RecordingMCPServer + CallRecorder (traces every MCP call, saves screenshots)
-│     ├─ preflight.py           # BUILT: admin, Windows-MCP tool list, ENV-000
+│     ├─ preflight.py           # BUILT: admin, Windows-MCP tool list, ENV-000, host not running (v2.3)
+│     ├─ host.py                # BUILT (v2.3): find the host executable, running host PIDs, kill the host
+│     ├─ ui_tree.py             # BUILT (v2.3): Snapshot UI-tree parser for window_in_ui / seen_in_ui
 │     ├─ observations.py        # BUILT: observations.json (shared by preflight and record_observation)
 │     ├─ agent2.py              # BUILT: Agent 2 + Windows-MCP + record_observation + limits
-│     ├─ guardrails.py          # BUILT: PowerShell allow-list, Registry/FileSystem/Process rules
-│     ├─ verdict.py             # BUILT: PASS/FAIL/BLOCKED/ERROR from observations (code only)
+│     ├─ guardrails.py          # BUILT: PowerShell allow-list, Registry/FileSystem/Process/App/Wait rules
+│     ├─ verdict.py             # BUILT: PASS/FAIL/NEEDS_REVIEW/BLOCKED/ERROR from observations (code only)
 │     ├─ cleanup.py             # BUILT: msiexec /x if the app is still installed at the end
 │     ├─ report.py              # BUILT: results.json + report.html
 │     └─ templates/             # BUILT: report.html.j2
 ├─ skills/                      # NEW: Markdown skills (§7)
 └─ tests/                       # BUILT: test_pipeline, test_windows_mcp, test_models, test_skills, test_selfcheck,
-                                #        test_agent1, test_guardrails, test_preflight, test_agent2, test_verdict
+                                #        test_agent1, test_guardrails, test_preflight, test_agent2, test_verdict,
+                                #        test_host, test_ui_tree (fixtures/: a real Snapshot UI tree)
 ```
 
 Nothing in `design/` imports from `execute/`. `pipeline.py` is the only module that uses both.

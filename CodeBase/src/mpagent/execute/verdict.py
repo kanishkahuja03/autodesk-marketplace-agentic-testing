@@ -1,17 +1,24 @@
 """Verdict engine (ARCHITECTURE.md §5, D7, D25): code turns raw observations into PASS/FAIL/BLOCKED/ERROR.
 
 Precedence for each test:
-  BLOCKED  a precondition is not PASS, or a placeholder the test needs was not resolved by Agent 2
-  ERROR    no observation, the test was not executed, or an expected key is missing / null
-  FAIL     any expected check fails
-  PASS     every expected check holds
+  BLOCKED       a precondition is not PASS, or a placeholder the test needs was not resolved by Agent 2
+  ERROR         no observation, the test was not executed, an expected key is missing / null, or a UI check
+                has no Snapshot / no host window to look in
+  FAIL          any expected check fails
+  NEEDS_REVIEW  a `seen_in_ui` label wasn't in the host window's UI tree, but a screenshot exists
+  PASS          every expected check holds
 Values are compared as text after light normalising, so 0 == "0" and True == "true".
+UI checks (`window_in_ui`, `seen_in_ui`, FUNCTIONAL_TESTS_PLAN.md L4, L5, L11, L17) are decided from the raw
+Snapshot UI-tree files attached to the observation; Agent 2's own value is kept only for the report.
 """
 
 import re
+from pathlib import Path
 
 from mpagent.design.selfcheck import PLACEHOLDER, texts_of
+from mpagent.execute import ui_tree
 from mpagent.models import (
+    UI_CHECKS,
     Check,
     CheckResult,
     Expectation,
@@ -24,6 +31,8 @@ from mpagent.models import (
 )
 
 ALWAYS_KNOWN = {"INSTALLER_PATH", "RUN_DIR"}  # given to Agent 2 by code
+UI_TEXT_SUFFIX = "_Snapshot_ui.txt"  # raw Snapshot text saved by the call recorder
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg")
 
 
 def norm(value: Scalar) -> str:
@@ -53,9 +62,28 @@ def check_one(e: Expectation, observed: Scalar) -> bool:
     raise ValueError(f"unknown check {e.check}")
 
 
-def evaluate(plan: TestPlan, observations: list[Observation], resolved_env: set[str] | None) -> list[TestResult]:
+class UiContext:
+    """Where UI checks look: the run folder (for the attached Snapshot files) and the host's main-window regex."""
+
+    def __init__(self, run_dir: Path | None, main_window: str | None):
+        self.run_dir, self.main_window = run_dir, main_window
+
+    def texts(self, obs: Observation) -> list[str]:
+        if self.run_dir is None:
+            return []
+        out = []
+        for rel in obs.evidence:
+            path = self.run_dir / rel
+            if rel.endswith(UI_TEXT_SUFFIX) and path.is_file():
+                out.append(path.read_text(encoding="utf-8", errors="replace"))
+        return out
+
+
+def evaluate(plan: TestPlan, observations: list[Observation], resolved_env: set[str] | None,
+             ui: UiContext | None = None) -> list[TestResult]:
     """One TestResult per test, in plan order. `resolved_env` is None when Agent 2 returned no env
     (e.g. it was cut off); then unresolved placeholders don't block, missing observations give ERROR."""
+    ui = ui or UiContext(None, None)
     by_id = {o.test_id: o for o in observations}
     tests = {t.id: t for t in plan.testcases}
     results: dict[str, TestResult] = {}
@@ -64,7 +92,7 @@ def evaluate(plan: TestPlan, observations: list[Observation], resolved_env: set[
         if tid not in results:
             if tid in visiting:  # cycles are rejected by the self-check; guard anyway
                 raise ValueError(f"precondition cycle at {tid}")
-            results[tid] = _evaluate_test(tests[tid], by_id.get(tid), resolved_env,
+            results[tid] = _evaluate_test(tests[tid], by_id.get(tid), resolved_env, ui,
                                           {p: result_of(p, visiting | {tid}) for p in tests[tid].preconditions
                                            if p in tests})
         return results[tid]
@@ -72,7 +100,7 @@ def evaluate(plan: TestPlan, observations: list[Observation], resolved_env: set[
     return [result_of(t.id) for t in plan.testcases]
 
 
-def _evaluate_test(t: TestCase, obs: Observation | None, resolved_env: set[str] | None,
+def _evaluate_test(t: TestCase, obs: Observation | None, resolved_env: set[str] | None, ui: UiContext,
                    preconditions: dict[str, TestResult]) -> TestResult:
     evidence = list(obs.evidence) if obs else []
     notes = obs.notes if obs else None
@@ -96,14 +124,50 @@ def _evaluate_test(t: TestCase, obs: Observation | None, resolved_env: set[str] 
     values = {kv.key: kv.value for kv in obs.observed}
     checks: list[CheckResult] = []
     missing: list[str] = []
+    ui_errors: list[str] = []
     for e in t.expected:
         expected = e.values if e.check is Check.IN else e.value
+        if e.check in UI_CHECKS:
+            check, problem = _ui_check(e, obs, ui, values.get(e.key))
+            checks.append(check)
+            if problem:
+                ui_errors.append(problem)
+            continue
         if values.get(e.key) is None:
             missing.append(e.key)
             checks.append(CheckResult(key=e.key, check=e.check, expected=expected, observed=None, ok=False))
             continue
         checks.append(CheckResult(key=e.key, check=e.check, expected=expected, observed=values[e.key],
                                   ok=check_one(e, values[e.key])))
-    if missing:
-        return result(Status.ERROR, checks, "no value observed for " + ", ".join(missing))
-    return result(Status.PASS if all(c.ok for c in checks) else Status.FAIL, checks, None)
+    if missing or ui_errors:
+        reasons = (["no value observed for " + ", ".join(missing)] if missing else []) + ui_errors
+        return result(Status.ERROR, checks, "; ".join(reasons))
+    if any(not c.ok and not c.needs_review for c in checks):
+        return result(Status.FAIL, checks, None)
+    if any(c.needs_review for c in checks):
+        return result(Status.NEEDS_REVIEW, checks, "label not found in the host window's UI tree; check the screenshot")
+    return result(Status.PASS, checks, None)
+
+
+def _ui_check(e: Expectation, obs: Observation, ui: UiContext, reported: Scalar) -> tuple[CheckResult, str | None]:
+    """A UI check decided from the attached raw Snapshot texts. Returns the check and an ERROR reason, if any."""
+    texts = ui.texts(obs)
+
+    def make(observed: Scalar, ok: bool, review: bool = False) -> CheckResult:
+        return CheckResult(key=e.key, check=e.check, expected=e.value, observed=observed, ok=ok,
+                           needs_review=review, reported=reported)
+
+    if not ui.main_window:
+        return make(None, False), f"{e.key}: the host notes have no main_window pattern"
+    if not texts:
+        return make(None, False), f"{e.key}: no Snapshot was attached to this observation"
+    if e.check is Check.WINDOW_IN_UI:
+        ok = ui_tree.window_in_ui(texts, ui.main_window, str(e.value))
+        return make("seen" if ok else "not seen", ok), None
+    found = ui_tree.seen_in_ui(texts, ui.main_window, str(e.value))
+    if found == "no_host_window":
+        return make("no host window", False), f"{e.key}: the host window is in none of the Snapshots"
+    if found == "found":
+        return make("seen", True), None
+    has_screenshot = any(r.lower().endswith(IMAGE_SUFFIXES) for r in obs.evidence)
+    return make("not seen", False, review=has_screenshot), None
