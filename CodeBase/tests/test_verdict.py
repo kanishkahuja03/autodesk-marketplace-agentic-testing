@@ -4,7 +4,7 @@ import json
 
 import pytest
 from plans import good_plan_data, load_plan_data
-from test_ui_tree import HOST, MAIN
+from test_ui_tree import HOST
 
 from mpagent.design.agent1 import add_built_in_tests
 from mpagent.execute.agent2 import RESULT_FILE
@@ -16,6 +16,7 @@ from mpagent.models import (
     Check,
     Expectation,
     InstallerFacts,
+    Judgement,
     KeyValue,
     Observation,
     Status,
@@ -132,12 +133,12 @@ def test_report_after_cut_off_run_marks_missing_tests_error(tmp_path):
     assert "Agent 2 did not finish" in (tmp_path / "report.html").read_text(encoding="utf-8")
 
 
-# ---------------------------------------------------------------- LOAD: UI checks (FUNCTIONAL_TESTS_PLAN.md L4-L6, L11)
-NO_TAB = HOST.replace('tab item "P&ID  Exporter"', 'tab item "Insert"')
+# ---------------------------------------------------------------- LOAD: code checks and judged claims (L11, L20-L25)
 NO_DOCUMENT = HOST.replace("[Drawing1.dwg]", "Start").replace('tab item "Drawing1"', 'tab item "Start"')
+SHOT = "evidence/LOAD-001_Screenshot_1.png"
 
 
-def load_plan() -> TestPlan:  # ENV-000, INST-001, INST-002, LOAD-000, LOAD-001, UNIN-001
+def load_plan() -> TestPlan:  # ENV-000, INST-001, INST-002, LOAD-000, LOAD-001 (judged), UNIN-001
     return add_built_in_tests(TestPlan.model_validate(load_plan_data()), FACTS, host_process("autocad-plant3d"))
 
 
@@ -153,71 +154,87 @@ def ui_obs(run_dir, tid, snapshot: str | None, screenshot=True, **values):
     return o.model_copy(update={"evidence": evidence})
 
 
-def load_results(tmp_path, load000_snapshot=HOST, load001_snapshot=HOST, screenshot=True, **load001_values):
+def judgement(verdict="PASS", evidence=(SHOT,), findings=()) -> Judgement:
+    return Judgement(verdict=verdict, shown="a new tab 'P&ID Connector'", differences=[], findings=list(findings),
+                     evidence=list(evidence), reason="the tab is in the screenshot")
+
+
+def stand_in_judge(answer: Judgement | Exception, calls: list | None = None):
+    def judge(t, e, o):
+        if calls is not None:
+            calls.append((t.id, e.value, list(o.evidence)))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    return judge
+
+
+def load_results(tmp_path, judge=None, load000_snapshot=HOST, screenshot=True, **load001_values):
     o000 = ui_obs(tmp_path, "LOAD-000", load000_snapshot, host_started=True, document_opened=True,
                   error_dialog_seen=False, load_prompt_seen=False)
-    o001 = ui_obs(tmp_path, "LOAD-001", load001_snapshot, screenshot=screenshot,
-                  **(load001_values or {"entry_point_label": "P&ID Exporter"}))
-    ui = UiContext(tmp_path, host_process("autocad-plant3d").main_window)
+    o001 = ui_obs(tmp_path, "LOAD-001", HOST, screenshot=screenshot,
+                  **(load001_values or {"entry_point_seen": "a tab 'P&ID Connector'"}))
+    ui = UiContext(tmp_path, host_process("autocad-plant3d").main_window, judge)
     return {r.test_id: r for r in evaluate(load_plan(), happy() + [o000, o001], set(), ui)}
 
 
-def test_load_tests_pass_from_the_ui_tree(tmp_path):
-    r = load_results(tmp_path)
+def test_the_judge_decides_the_claim_from_the_screenshots(tmp_path):
+    calls = []
+    r = load_results(tmp_path, stand_in_judge(judgement(), calls))
     assert r["LOAD-000"].status is Status.PASS and r["LOAD-001"].status is Status.PASS
     assert r["UNIN-001"].status is Status.PASS  # UNIN never depends on LOAD
+    assert calls == [("LOAD-001", "After installation the host shows a new tab called “P&ID Exporter”",
+                      ["evidence/LOAD-001_Snapshot_ui.txt", SHOT])]
+    assert r["LOAD-001"].judgement.evidence == [SHOT] and r["LOAD-001"].notes.startswith("judge: ")
 
 
-def test_ui_tree_decides_not_agent2(tmp_path):
-    # Agent 2 said null / something else: the UI tree still decides (L5); its value is kept for the report
-    r = load_results(tmp_path, entry_point_label=None)["LOAD-001"]
-    assert r.status is Status.PASS and r.checks[0].reported is None and r.checks[0].observed == "seen"
-    assert load_results(tmp_path, load001_snapshot=NO_TAB, entry_point_label="P&ID Exporter")["LOAD-001"].status         is Status.NEEDS_REVIEW
+def test_judge_verdicts_and_findings(tmp_path):
+    # L23: only the app's own text matches -> PASS with a documentation-mismatch finding
+    mismatch = "Documentation mismatch: the documents say 'P&ID Exporter', the app shows 'P&ID Connector'"
+    r = load_results(tmp_path, stand_in_judge(judgement(findings=[mismatch])))["LOAD-001"]
+    assert r.status is Status.PASS and r.findings == [mismatch]
+    assert load_results(tmp_path, stand_in_judge(judgement("FAIL")))["LOAD-001"].status is Status.FAIL
+    assert load_results(tmp_path, stand_in_judge(judgement("NEEDS_REVIEW")))["LOAD-001"].status is Status.NEEDS_REVIEW
 
 
-def test_label_missing_is_needs_review_with_screenshot_else_fail(tmp_path):
-    r = load_results(tmp_path, load001_snapshot=NO_TAB)["LOAD-001"]
-    assert r.status is Status.NEEDS_REVIEW and r.checks[0].needs_review and "screenshot" in r.notes
-    assert load_results(tmp_path, load001_snapshot=NO_TAB, screenshot=False)["LOAD-001"].status is Status.FAIL
+def test_judge_guards(tmp_path):
+    # L25: never without screenshots, never on a screenshot not attached to the test, a failed call is ERROR
+    r = load_results(tmp_path, stand_in_judge(judgement()), screenshot=False)["LOAD-001"]
+    assert r.status is Status.ERROR and "never judged from notes alone" in r.notes
+    r = load_results(tmp_path, stand_in_judge(judgement(evidence=["evidence/999_Screenshot_1.png"])))["LOAD-001"]
+    assert r.status is Status.ERROR and "named no screenshot attached" in r.notes
+    assert load_results(tmp_path, stand_in_judge(judgement(evidence=["LOAD-001_Screenshot_1.png"])))[
+        "LOAD-001"].status is Status.PASS  # the bare file name is fine
+    r = load_results(tmp_path, stand_in_judge(TimeoutError("slow")))["LOAD-001"]
+    assert r.status is Status.ERROR and "judge call failed (TimeoutError: slow)" in r.notes
+    r = load_results(tmp_path, None)["LOAD-001"]
+    assert r.status is Status.ERROR and "no judge available" in r.notes
 
 
-def test_no_host_window_or_no_snapshot_is_error(tmp_path):
-    assert load_results(tmp_path, load001_snapshot=REAL_OTHER_WINDOW)["LOAD-001"].status is Status.ERROR
-    r = load_results(tmp_path, load001_snapshot=None)["LOAD-001"]
-    assert r.status is Status.ERROR and "no Snapshot" in r.notes
+def test_agent2_value_is_not_needed_for_a_judged_claim(tmp_path):
+    r = load_results(tmp_path, stand_in_judge(judgement()), entry_point_seen=None)["LOAD-001"]
+    assert r.status is Status.PASS and r.checks[0].reported is None
 
 
 def test_window_in_ui_not_seen_is_fail_and_blocks_load001(tmp_path):
-    r = load_results(tmp_path, load000_snapshot=NO_DOCUMENT)
+    r = load_results(tmp_path, stand_in_judge(judgement()), load000_snapshot=NO_DOCUMENT)
     assert r["LOAD-000"].status is Status.FAIL
     assert [c.key for c in r["LOAD-000"].checks if not c.ok] == ["document_opened"]
     assert r["LOAD-001"].status is Status.BLOCKED
 
 
-def test_needs_review_blocks_dependents(tmp_path):
-    data = load_plan_data()
-    data["testcases"].insert(3, {**data["testcases"][2], "id": "LOAD-002", "preconditions": ["LOAD-001"]})
-    p = add_built_in_tests(TestPlan.model_validate(data), FACTS, host_process("autocad-plant3d"))
-    o000 = ui_obs(tmp_path, "LOAD-000", HOST, host_started=True, document_opened=True, error_dialog_seen=False)
-    o001 = ui_obs(tmp_path, "LOAD-001", NO_TAB, entry_point_label=None)
-    ui = UiContext(tmp_path, MAIN)
-    s = statuses(evaluate(p, happy() + [o000, o001], set(), ui))
-    assert s["LOAD-001"] is Status.NEEDS_REVIEW and s["LOAD-002"] is Status.BLOCKED
-
-
-def test_report_shows_needs_review_and_agent2_value(tmp_path):
+def test_report_shows_the_judgement_and_findings(tmp_path):
     for o in happy():
         save_observation(tmp_path, o)
     save_observation(tmp_path, ui_obs(tmp_path, "LOAD-000", HOST, host_started=True, document_opened=True,
-                                      error_dialog_seen=False, load_prompt_seen=True))
-    save_observation(tmp_path, ui_obs(tmp_path, "LOAD-001", NO_TAB, entry_point_label="P&ID Exporter"))
-    run = write_report(load_plan(), tmp_path)
+                                      error_dialog_seen=False, load_prompt_seen=False))
+    save_observation(tmp_path, ui_obs(tmp_path, "LOAD-001", HOST, entry_point_seen="a tab 'P&ID Connector'"))
+    mismatch = "Documentation mismatch: the documents say 'P&ID Exporter', the app shows 'P&ID Connector'"
+    run = write_report(load_plan(), tmp_path, judge=stand_in_judge(judgement("NEEDS_REVIEW", findings=[mismatch])))
     assert run.counts["NEEDS_REVIEW"] == 1 and run.counts["PASS"] == 5
     html = (tmp_path / "report.html").read_text(encoding="utf-8")
-    assert 'class="status NEEDS_REVIEW"' in html and "Agent 2 said" in html
-
-
-REAL_OTHER_WINDOW = HOST.replace("AutoCAD Plant 3D 2027 - [Drawing1.dwg]", "Notepad")
+    assert 'class="status NEEDS_REVIEW"' in html and "Decided by the LLM judge" in html
+    assert "<h2>Findings</h2>" in html and "Documentation mismatch" in html
 
 
 def test_report_shows_host_crash_records(tmp_path):

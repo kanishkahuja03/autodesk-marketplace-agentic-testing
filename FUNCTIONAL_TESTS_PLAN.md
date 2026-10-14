@@ -1,6 +1,6 @@
 # Implementation Plan: LOAD test (is the plug-in loaded in its host?), then FUNC
 
-> **Status:** v3, after the grill-me review on 2026-10-13 (questions Q1–Q17, all agreed). Branch `Dev-FunctionalTest`. **Code implemented 2026-10-13** (build steps 2–8 and 10 done, see §6). Recorded in ARCHITECTURE.md v2.3 as **D40–D57** and in ADR.md as ADR-033–040 (D53–D57 / L19 added after the live runs of 2026-10-13/14).
+> **Status:** v3 + **Phase 1b built 2026-10-14** (§9; live run pending), after the grill-me review on 2026-10-13 (questions Q1–Q17, all agreed). Branch `Dev-FunctionalTest`. **Code implemented 2026-10-13** (build steps 2–8 and 10 done, see §6). Recorded in ARCHITECTURE.md v2.3 as **D40–D57** and in ADR.md as ADR-033–040 (D53–D57 / L19 added after the live runs of 2026-10-13/14).
 > **Builds on:** [`ARCHITECTURE.md`](ARCHITECTURE.md) v2.2 (D1–D39), [`ADR.md`](ADR.md). The decisions in §3 go into ARCHITECTURE.md as D40+ and into ADR.md.
 > **v3 changes:** LOAD opens the host's **default new document** (not an app-specific one). Code adds a **built-in LOAD-000**, and Agent 1 writes **at most one** LOAD test. Code decides from the **raw UI tree** (`window_in_ui`, `seen_in_ui`). There is **one** Agent 2 session, protected by a "no uninstall while the host runs" guardrail. Host facts that code needs go in **YAML front matter** in the host notes. The host is **closed by Process kill**, and **preflight stops if the host is already running**. The **machine check is now build step 1**.
 > **Rule kept from D1:** nothing in the core code or the generic skills names Plant 3D, P&ID, a ribbon label or any plug-in. Product knowledge lives only in **host notes** (one Markdown file per host) and comes from the **app's own documents** at run time. P&ID examples appear only in tests and in `hosts/autocad-plant3d.md`.
@@ -49,9 +49,9 @@ ENV → INST → LOAD (start host → default new document → Snapshot → entr
 |---|---|---|
 | L1 (Q1) | What does LOAD open? | The host + its **default new document** (a host-notes recipe, e.g. Ctrl+N → `Drawing1`). The app-specific context ("in a P&ID project with a drawing open") is about *using* the app: Agent 1 records it on the card as `use_context` for **Phase 2**. |
 | L2 (Q2) | Who writes the LOAD tests? | **Code adds a built-in LOAD-000** (`origin: built-in`, no citation) whenever the host notes have `host_process`. **Agent 1 writes at most one test, LOAD-001** (the app claim, cited). *(After run 20261013-172934: exactly one is required when the entry point is visible.)* If the docs name no visible entry point, there is no LOAD-001 and Agent 1 adds an open question. |
-| L3 (Q3) | What does LOAD-001 check? | **The label only** (e.g. the tab name). `entry_point.items` lists only **quoted** names. Anything the docs count but don't name becomes an open question. Clicking the tab or buttons is Phase 2. |
-| L4 (Q4) | How does `seen_in_ui` match? | Code parses the **UI Tree** section, takes the subtree of `window "<title>"` whose title matches the host's `main_window` regex, and passes only if an **element's quoted name equals the label** after normalising (casefold, collapsed whitespace, `&`/`&&` accelerator markers stripped). No host window → ERROR. Host window present but no such element → **NEEDS_REVIEW** if a screenshot exists, otherwise **FAIL**. |
-| L5 (Q5) | Agent 2's value vs the UI tree | For `seen_in_ui` and `window_in_ui`, **the UI tree decides**. The "null value → ERROR" rule doesn't apply, and Agent 2's value is shown in the report only ("Agent 2 said: …"). **`record_observation` refuses** a test with such a check if no Snapshot was taken since the previous record ("take a Snapshot of the host window first"). |
+| L3 (Q3) | What does LOAD-001 check? | **The label only** (e.g. the tab name). `entry_point.items` lists only **quoted** names. Anything the docs count but don't name becomes an open question. Clicking the tab or buttons is Phase 2. *(superseded by L21 (claims judged by an LLM; LOAD-002 for the items), 2026-10-14.)* |
+| L4 (Q4) | How does `seen_in_ui` match? | Code parses the **UI Tree** section, takes the subtree of `window "<title>"` whose title matches the host's `main_window` regex, and passes only if an **element's quoted name equals the label** after normalising (casefold, collapsed whitespace, `&`/`&&` accelerator markers stripped). No host window → ERROR. Host window present but no such element → **NEEDS_REVIEW** if a screenshot exists, otherwise **FAIL**. *(superseded by L20/L23 (`seen_in_ui` is retired; the judge decides UI claims), 2026-10-14.)* |
+| L5 (Q5) | Agent 2's value vs the UI tree | For `seen_in_ui` and `window_in_ui`, **the UI tree decides**. The "null value → ERROR" rule doesn't apply, and Agent 2's value is shown in the report only ("Agent 2 said: …"). **`record_observation` refuses** a test with such a check if no Snapshot was taken since the previous record ("take a Snapshot of the host window first"). *(partly superseded: for `window_in_ui` (LOAD-000) the UI tree still decides; UI claims go to the judge (L20), 2026-10-14.)* |
 | L6 (Q6) | NEEDS_REVIEW | New status. Precedence within a test: BLOCKED → ERROR → FAIL → NEEDS_REVIEW → PASS. It **isn't PASS**, so dependents are BLOCKED. Shown in `results.json` counts, `summary_line` and the report (its own colour, screenshot inline). Exit codes are unchanged. **Don't design around it now** (see §9 open point). |
 | L7 (Q7) | One or two Agent 2 sessions? | **One session.** A guardrail **rejects an uninstall `msiexec /x` while any host process is running**, telling Agent 2 to kill the host first. `finally` kills the host again as a backstop. No env hand-over, one `CallPolicy`. |
 | L8 | Does UNIN depend on LOAD? | **No**, only on INST. The uninstall is always tested. |
@@ -61,7 +61,7 @@ ENV → INST → LOAD (start host → default new document → Snapshot → entr
 | L12 (Q11) | Host already running at start | **Preflight stops**: "<host> is running (PIDs …). Close it and run again — Agent 2 not started." *(As built: since the preflight guarantees that no host process ran before, code kills every host process it finds later; no PID list is kept.)* `finally` order: **kill host → cleanup (msiexec /x) → verdicts → report**. |
 | L13 (Q12) | How the host is closed | **Agent 2: one `Process kill`** of the host's processes after recording LOAD (never save, never use the host's own exit). **Code: kill only**, no graceful attempt (it would hang on "Save changes?"). The *Close without saving* host-notes section is kept for Phase 2. |
 | L14 (Q13) | Waiting and time limits | The guardrail **caps `WaitFor.timeout` and `Wait.duration` at tool timeout − 15 s (105 s)** with the hint "call again to wait longer". The skill waits for the host window at most **twice** (≈ 3.5 min). `AGENT2_TIMEOUT_MIN` = **40** (shrink after real timings), `AGENT2_MAX_TURNS` stays 150. |
-| L15 (Q14) | Which entry-point kinds get LOAD-001 | Only **`ribbon_tab`, `menu`, `toolbar`** (visible after start). For `command` or `own_window`, Agent 1 fills the card but writes no LOAD-001 and adds an open question. `Summary.entry_point` is nullable. |
+| L15 (Q14) | Which entry-point kinds get LOAD-001 | Only **`ribbon_tab`, `menu`, `toolbar`** (visible after start). For `command` or `own_window`, Agent 1 fills the card but writes no LOAD-001 and adds an open question. `Summary.entry_point` is nullable. *(still applies to LOAD-001; LOAD-002 added by L21, 2026-10-14.)* |
 | L16 (Q15) | LOAD-000's precondition; failed install | LOAD-000 depends on **the INST test(s) observing `install_exit_code`** (D24 guarantees one exists). LOAD-001 depends on LOAD-000. If the recorded install exit code isn't a success value, Agent 2 **doesn't start the host**: it records LOAD as `executed: false` ("install failed") and goes on to UNIN (verdict: BLOCKED). |
 | L17 (Q16) | Which Snapshot text the verdict reads | The recorder saves the **full raw text** of every Snapshot as `evidence/<n>_Snapshot_ui.txt`. `window_in_ui`/`seen_in_ui` read **only those files**, never the trace (capped at 20,000 characters) or the model's cleaned copy. What the model sees is unchanged in Phase 1. |
 | L18 (Q17) | Build order | **The machine check is build step 1**: it fills the Plant 3D host notes and saves a real Snapshot that becomes the parser's test fixture. |
@@ -227,7 +227,67 @@ The UI rules from the installer skill still apply: full paths only, no Run dialo
 
 ---
 
-## 9. Phase 2 (later): running features (FUNC)
+## 9. Phase 1b: UI claims judged by an LLM (agreed and built 2026-10-14; live run pending)
+
+### 9.1 Why
+Run `20261014-124157` (11 PASS, 1 NEEDS_REVIEW) showed the limits of checking UI claims by exact strings:
+- **The documents and the product disagree.** The user guide says *"a new tab called 'P&ID Exporter', which contains two new buttons"*. The plug-in shows a tab **"P&ID Connector"** with two groups: **Tools** (Export P&ID, Export selection) and **Settings** (Help, Language, Info). The plug-in's own DLLs contain exactly these words (checked by extracting the MSI with 7-Zip); "P&ID Exporter" is not the tab name anywhere.
+- **Whether a UI claim holds is a judgement** (same entry point, different name? how many "buttons"?), not a string comparison.
+- **Plant 3D doesn't expose ribbon tabs in the UI tree**, so `seen_in_ui` could only say NEEDS_REVIEW.
+- Code and skills that "select the tab, open its groups" would only fit ribbon hosts and **break the generic design (D1)**.
+
+### 9.2 Decisions
+| # | Topic | Decision |
+|---|---|---|
+| L20 | Who decides UI claims | An **LLM judge**: a separate model call with a fresh context that sees only the claim and the evidence, using the same `OPENAI_MODEL`. Agent 2 does not grade its own work (it is the executor; its context is long; earlier runs invented values). **Facts stay with code** (D7): exit codes, registry, files, and LOAD-000's host window / new document (`window_in_ui`). |
+| L21 | Claims, not strings | New check **`judged`**: its `value` is the documented claim in plain words; the test's citation(s) give the source. Agent 1 writes **LOAD-001** "the documented entry point is present" and **LOAD-002** "the documented items of the entry point are reachable" (when the documents name or count items). `seen_in_ui` is retired. Nothing in the claim format is specific to tabs: it is whatever the documents say (tab, menu, toolbar, palette, window). |
+| L22 | The app's own UI text as evidence | S1 (code, no UI) extracts the readable text of the binaries in the installer (`.dll`, `.exe`: UTF-16 and UTF-8 strings, filtered, de-duplicated, capped) into a new citable source **`U1`**, marked as *hints*: it can contain text of related products (here: the Revit Importer). Agent 1 may cite `U1` next to the documents, and must raise an open question when they disagree. Generic for any Windows app. |
+| L23 | The judge's rule | Shown entry point/items **match the documents** → PASS. **Match only the app's own text (`U1`)** → **PASS with a finding** "documentation mismatch: the documents say X, the app shows Y". **Match neither** → FAIL. **Can't tell from the evidence** → NEEDS_REVIEW. |
+| L24 | Agent 2 explores generically | Skill wording without UI types: bring the host to the state the claim describes, then explore the entry point like a tester. **Open things that only reveal more UI** (e.g. a tab, a group, a drop-down, a menu), **never trigger anything that acts** (runs a feature, opens a website or window, changes settings, saves). A Screenshot of every state; the notes describe what was seen. The evidence and record are the existing ones (screenshots attached, `notes`), as for dialogs (D56). |
+| L25 | Code guards around the judge | The judge must name at least one screenshot that is attached to that test, otherwise ERROR. No screenshots → ERROR (never judged from notes alone). A failed judge call → ERROR for that test, not a crash. Preconditions and BLOCKED as today. Text in screenshots and notes is untrusted data for the judge. The judgement (verdict, what is shown, differences, findings, screenshot used, reason) is stored in `results.json`. |
+| L26 | Report | For every judged test: the claim with its quote, the verdict, the judge's reason, the findings and the screenshot it used. A **Findings** section lists all findings of the run (e.g. documentation mismatches). |
+
+### 9.3 Design
+- **Agent 1 (test-design skill):** the entry-point card stays (`kind`, `label`, `items`, `use_context`, `sources`), and its sources may now include `U1`. LOAD-001 claim: e.g. *"After installation the host shows a new tab called 'P&ID Exporter'"* (D2). LOAD-002 claim: e.g. *"The entry point contains two new buttons; one is 'Export', which exports the drawing to JSON"* (D2). Open questions: e.g. *"D2 says 'P&ID Exporter'; U1 contains 'P&ID Connector'"*.
+- **S1 (`design/static_read.py` + a new `design/ui_text.py`):** UI-text extraction into `documents/U1_ui_text.txt`, added to the evidence pack.
+- **Agent 2 (`host-interaction.md`):** the exploration rule of L24. LOAD-001 and LOAD-002 are recorded with screenshots and notes; their values are Agent 2's description only.
+- **Judge (`execute/judge.py` + `skills/execute/judge.md`, both generic):** one call per `judged` test after Agent 2, inside the verdict step. Input: the claim, its quotes (documents and `U1`), the test's screenshots (as images, the latest few), the host-window part of its Snapshot texts, and Agent 2's notes, labelled as *the executor's description, not proof*. Output, strict schema: `verdict`, `shown`, `differences`, `findings[]`, `evidence[]`, `reason`.
+- **Verdict engine:** `judged` expectations call the judge; L25 guards; the precedence stays BLOCKED → ERROR → FAIL → NEEDS_REVIEW → PASS.
+- **Models:** `Check` + `judged`, − `seen_in_ui`; new `Judgement`; `TestResult` + `judgement`, `findings`.
+
+### 9.4 Changes by file (in `CodeBase/`)
+| File | Change |
+|---|---|
+| `src/mpagent/design/ui_text.py` (new), `static_read.py`, `evidence.py` | Extract the app's UI text → source `U1` |
+| `skills/test-design/SKILL.md` | `judged` claims; LOAD-001 + LOAD-002; citing `U1`; mismatch → open question |
+| `src/mpagent/design/selfcheck.py` | Rules for `judged` (LOAD only, citation required, claim must be supported by its quotes); LOAD-002 when items are documented; `seen_in_ui` rejected |
+| `skills/execute/host-interaction.md` | Generic exploration (reveal vs act), screenshots and notes |
+| `src/mpagent/execute/judge.py`, `skills/execute/judge.md` (new) | The judge call and its instructions (generic) |
+| `src/mpagent/execute/verdict.py`, `report.py`, `templates/report.html.j2` | Judged checks, guards, judgement and findings in results and report |
+| `src/mpagent/models.py` | `Check.JUDGED`, `Judgement`, `TestResult.judgement/findings`; remove `SEEN_IN_UI` |
+| `tests/` | `test_ui_text`, `test_judge` (stand-in model), extend `test_selfcheck`, `test_verdict`, `test_skills` |
+
+### 9.5 Build steps
+| # | Step | Done when |
+|---|---|---|
+| 1 | `U1` UI-text extraction in S1 | **Done.** `U1` = 12,650 characters with "P&ID Connector", "Tools", "Export selection", "Settings", "Language", "Help", "Info"; binaries deleted after reading. Also fixed: S1 called Git's `expand.exe` when Git's tools were on PATH (so nothing unpacked in tests); it now always uses Windows' own |
+| 2 | Models + self-check for `judged`, LOAD-002 | **Done.** Unit tests per rule |
+| 3 | Judge (`judge.py`, `judge.md`) with a stand-in model for tests | **Done.** Unit tests: guards, ERROR paths, the judge's input |
+| 4 | **Offline replay** on run `20261014-124157`: the judge gets screenshot 028 and the notes | **Done, twice, same result:** LOAD-001 PASS, finding *"Documentation mismatch: the documents say 'P&ID Exporter', the app shows 'P&ID Connector'"*, evidence `028_Screenshot_1.png`; the replayed run = 12 PASS |
+| 5 | Skills: test-design, host-interaction (L24) | **Written**; team review open |
+| 6 | Report: judgements and the Findings section (+ `FINDING` lines in `run.log`) | **Done** |
+| 7 | Live run (elevated F5) | LOAD-000 PASS (code), LOAD-001 and LOAD-002 judged with screenshots, findings listed |
+
+### 9.6 Risks
+| Risk | Mitigation |
+|---|---|
+| The judge hallucinates | It must name an attached screenshot (L25); its reason is stored and shown; "can't tell" is allowed (NEEDS_REVIEW); it never judges from notes alone |
+| Different verdicts on repeated runs | Strict output schema; the rule of L23 in the judge skill; the screenshots stay as evidence for a human |
+| `U1` noise (shared DLLs, libraries) | Marked as hints; only cited strings count; filtering and a size cap |
+| Text in screenshots tries to instruct the judge | Untrusted-data rule in the judge skill, as for Agent 1 and Agent 2 |
+| Cost and time | One judge call per judged test (two per run here) |
+
+## 10. Phase 2 (later): running features (FUNC)
 
 **Open point from the grill (Q6):** NEEDS_REVIEW on LOAD-001 would block every FUNC test that depends on it. If step 1 or the live runs show that the entry point isn't in the UI tree, **fix the observation** (e.g. a host-notes recipe that makes it visible), don't weaken the precondition rule.
 

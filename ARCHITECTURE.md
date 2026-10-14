@@ -1,6 +1,6 @@
 # Architecture V2: Generic Plug-in / App Validation Agents
 
-> **Status:** v2.2, 2026-10-13. This is the build plan for the product. v2.1 added the grill-me decisions D16–D35 (one F5 run, preflight, cleanup, logging, guardrails, `record_observation`). **v2.2** records what the live runs of 2026-10-12/13 taught (D24, D26, D27, D30, D32, D33 updated; D36–D39 new): silent uninstall instead of the UI, read-only FileSystem, per-run guardrail rules, cleaned and capped tool results, app facts in Agent 2's input. First clean run: `20261013-152426` (3 PASS). **v2.3** (2026-10-13, branch `Dev-FunctionalTest`) adds the **LOAD** test level from the grill-me review of [`FUNCTIONAL_TESTS_PLAN.md`](FUNCTIONAL_TESTS_PLAN.md) (D8, D9, D16, D29, D35 updated; D40–D57 new).
+> **Status:** v2.2, 2026-10-13. This is the build plan for the product. v2.1 added the grill-me decisions D16–D35 (one F5 run, preflight, cleanup, logging, guardrails, `record_observation`). **v2.2** records what the live runs of 2026-10-12/13 taught (D24, D26, D27, D30, D32, D33 updated; D36–D39 new): silent uninstall instead of the UI, read-only FileSystem, per-run guardrail rules, cleaned and capped tool results, app facts in Agent 2's input. First clean run: `20261013-152426` (3 PASS). **v2.3** (2026-10-13, branch `Dev-FunctionalTest`) adds the **LOAD** test level from the grill-me review of [`FUNCTIONAL_TESTS_PLAN.md`](FUNCTIONAL_TESTS_PLAN.md) (D7, D8, D9, D16, D29, D35 updated; D40–D57 new; D58–D63 new).
 > **Supersedes:** [`ARCHITECTURE_old1.md`](ARCHITECTURE_old1.md) (v0.3). Where they disagree, **this document wins**, including over what is already in `CodeBase/`.
 > **Inputs to this version:** [`ARCHITECTURE_COMPARISON.md`](ARCHITECTURE_COMPARISON.md) (ours vs `AppStore automation/`), [`AGENT_TOOLING_REVIEW.md`](AGENT_TOOLING_REVIEW.md) (tool lists, one by one), [`DESKTOP_UI_AUTOMATION_RESEARCH.md`](DESKTOP_UI_AUTOMATION_RESEARCH.md). Decision index: [`ADR.md`](ADR.md).
 
@@ -32,7 +32,7 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 | D4 | Agent 1 | **Blind, single pass.** No tools, no machine access. Output: `understanding.md` + `testcases.yaml`. |
 | D5 | Agent 2 | **One agent session for the whole plan**, driving the machine **only through Windows-MCP**. No action catalogue of our own. The single local exception is the reporting tool `record_observation` (D30). |
 | D6 | UI interaction | **[Windows-MCP](https://github.com/CursorTouch/Windows-MCP)** (reads the accessibility tree, then clicks, types and takes screenshots) |
-| D7 | Verdict | **Code** compares observed values with expected ones. The LLM never sets PASS/FAIL. For LOAD, code reads the Snapshot UI tree itself (D44). |
+| D7 | Verdict | **Code** decides every **fact** (exit codes, registry, files, LOAD-000's host window and new document). **Claims about what the UI shows** are decided by an evidence-bound **LLM judge** (D58, 2026-10-14); Agent 2 never sets a status. |
 | D8 | Demo test levels | **ENV, INST, LOAD, UNIN** (LOAD added in v2.3, D40–D52; FUNC later) |
 | D9 | Human review gate | **One y/n review of the test cases** in the console after Agent 1 (D57, requested by the seniors 2026-10-14); otherwise fully automatic. |
 | D10 | Doc extraction | **Keep the existing `intake.py`** (pypdf, python-docx, bs4) |
@@ -84,9 +84,9 @@ LOAD checks that the plug-in is **loaded by its host**: the host starts, opens a
 |---|---|---|
 | D40 | What LOAD opens | The host plus its **default new document** (host-notes recipe). App-specific documents and projects are FUNC (later); Agent 1 records them as `entry_point.use_context`. |
 | D41 | Who writes LOAD tests | Code adds the built-in **LOAD-000** "host ready with a new document" for hosts whose notes have `host_process`; it depends on the INST test(s) observing `install_exit_code`. Agent 1 writes **exactly one** test, **LOAD-001** "entry point visible" (cited, precondition `[LOAD-000]`), whenever the entry point is visible (`ribbon_tab`, `menu`, `toolbar`); the self-check requires it (run 20261013-172934). |
-| D42 | Entry-point card | `summary.entry_point` (nullable): `kind`, `label`, `items` (only quoted names), `use_context`, `sources`. The self-check finds every name in the cited quotes. LOAD-001 checks the **label only**. |
+| D42 | Entry-point card | `summary.entry_point` (nullable): `kind`, `label`, `items` (only quoted names), `use_context`, `sources`. The self-check finds every name in the cited quotes. LOAD-001 checks the **label only**. *(LOAD-001 "label only" is superseded by D59 (claims judged; LOAD-002 for the items), 2026-10-14.)* |
 | D43 | Host facts for code | Each host-notes file may have YAML front matter **`host_process`**: registry lookup of the install folder, executable, exact args, process names, main-window and new-document title regexes. Read by `mpagent/hostnotes.py`; no product names in code. |
-| D44 | UI checks | New checks **`window_in_ui`** (a title matching a regex inside the host window) and **`seen_in_ui`** (an element named exactly the label inside the host window). Code parses only the **UI Tree** of the raw Snapshot texts attached to the observation, only under the host's main window; Agent 2's value is shown in the report but never decides. |
+| D44 | UI checks | New checks **`window_in_ui`** (a title matching a regex inside the host window) and **`seen_in_ui`** (an element named exactly the label inside the host window). Code parses only the **UI Tree** of the raw Snapshot texts attached to the observation, only under the host's main window; Agent 2's value is shown in the report but never decides. *(`seen_in_ui` is superseded by D58/D61; `window_in_ui` stays for LOAD-000, 2026-10-14.)* |
 | D45 | NEEDS_REVIEW | New status: `seen_in_ui` label not found but a screenshot exists. Precedence BLOCKED → ERROR → FAIL → NEEDS_REVIEW → PASS. It isn't PASS, so dependents are BLOCKED. No host window or no Snapshot → ERROR; `window_in_ui` not seen → FAIL. |
 | D46 | Raw Snapshot evidence | The recorder saves every Snapshot's **full** text as `evidence/<n>_Snapshot_ui.txt` (decoded if Windows-MCP returns a JSON list) and attaches it like screenshots. `record_observation` refuses an executed UI-checked test without a Snapshot since the previous record. |
 | D47 | One session | Agent 2 stays **one session** (D5). A guardrail **rejects an uninstall `msiexec /x` while a host process runs**, so locked plug-in files can't spoil UNIN. UNIN never depends on LOAD. |
@@ -100,6 +100,18 @@ LOAD checks that the plug-in is **loaded by its host**: the host starts, opens a
 | D55 | Windows-MCP environment | The MCP SDK starts a stdio server with only 12 environment variables, and every program Windows-MCP starts inherits them. Without `ProgramData`, `ProgramFiles`, `CommonProgramFiles`, … Plant 3D crashed in `ODISSDK.dll` on every pipeline start (runs 20261013-175002, -184220; reproduced with the SDK's environment). Code now passes the server **this process's normal environment, minus anything named like a secret** (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `AUTH`, `COOKIE`), so API keys never reach Windows-MCP or the host (`execute/windows_mcp.py: server_env`). |
 | D56 | Dialogs: Agent 2 decides | **Agent 2 decides how to handle each dialog**, as a careful tester would: read it (Snapshot), take a Screenshot, judge what it is (notice, load/trust prompt for the app, error while the host still works, crash, something with a lasting effect or unclear) and pick the button with the **smallest lasting effect**, so the test can go on. The skill gives principles and examples, not a fixed list; never "Always …", "Don't show again" or a settings change; something with a lasting effect or unclear is not agreed to; the same dialog twice → stop LOAD. **Evidence and record use the existing workflow:** the screenshots (attached automatically) and the LOAD test's `notes` (title, text with an English gist, judgement, button, reason). No extra guardrail or dialog file. `error_dialog_seen` = an error, warning or crash was shown; a notice or load prompt is not an error. *(Run 20261014-111858: the plug-in's German notice "Hinweis" with only OK stopped LOAD under D49.)* |
 | D57 | Test-case review | After Agent 1 writes `testcases.yaml` and `understanding.md`, the console lists every test (ID, category, priority, title) with both file paths and asks **"Go ahead and run them on this machine? [y/n]"**. `y` continues to the preflight; `n` (or Ctrl+C / end of input) ends the run as `STOPPED: test plan not approved at the review`, before anything is installed. Without a console (unit tests, redirected input) the run continues and the log says so. *(Requested by the seniors, 2026-10-14, so a recorded demo shows the plan being checked before it runs.)* |
+
+### 2.5 UI claims judged by an LLM (D58–D63, agreed and built 2026-10-14; live run pending)
+Details and reasoning: [`FUNCTIONAL_TESTS_PLAN.md`](FUNCTIONAL_TESTS_PLAN.md) §9 (L20–L26). *(Run 20261014-124157: the guide says tab "P&ID Exporter"; the plug-in shows "P&ID Connector" with groups Tools / Settings, and its own DLLs contain exactly those words.)*
+
+| # | Topic | Decision |
+|---|---|---|
+| D58 | LLM judge for UI claims | A separate model call with a fresh context (same `OPENAI_MODEL`) decides tests whose expectation is a UI claim. It sees only the claim, its quotes, the test's screenshots, the host-window Snapshot text and Agent 2's notes (as the executor's description, not proof). Facts stay with code (D7). |
+| D59 | Claims, not strings | New check **`judged`** (value = the documented claim in plain words, with citations). Agent 1 writes LOAD-001 (entry point present) and LOAD-002 (documented items reachable). `seen_in_ui` is retired. Generic: the claim is whatever the documents describe. |
+| D60 | The app's own UI text | S1 extracts the readable text of the installer's binaries into a new citable source **`U1`** (hints; may contain related products' text). Agent 1 cites it next to the documents and raises an open question on any disagreement. |
+| D61 | The judge's rule and guards | Matches the documents → PASS; matches only `U1` → **PASS with a finding** "documentation mismatch"; neither → FAIL; can't tell → NEEDS_REVIEW. The judge must name an attached screenshot, otherwise ERROR; no screenshots or a failed call → ERROR. The judgement is stored in `results.json`. |
+| D62 | Generic exploration by Agent 2 | Agent 2 opens only what **reveals** more UI and never what **acts**; a Screenshot of every state; the notes describe what was seen. No UI-type specifics in code or skills. |
+| D63 | Findings in the report | Every judged test shows the claim, verdict, reason, findings and screenshot; a **Findings** section lists all findings of the run. |
 
 **Agent 2 resolves placeholders** (`${PLUGIN_DIR}` etc.) during its ENV tests and returns them in its final output.
 
@@ -145,7 +157,7 @@ LOAD checks that the plug-in is **loaded by its host**: the host starts, opens a
         ▼
    KILL HOST (code, finally) → CLEANUP (code, finally): msiexec /x only if still installed
         │
-   VERDICT ENGINE (code; LOAD from the raw Snapshot UI tree) → results.json → report.html
+   VERDICT ENGINE (code: facts; LLM judge: UI claims, D58) → results.json → report.html (+ Findings)
         │
    run.log: COMPLETED … / STOPPED …   (exit 0 / 1 / 2)
 ```
@@ -383,7 +395,8 @@ CodeBase/
 │  ├─ design/
 │  │  ├─ intake.py              # existing (keep)
 │  │  ├─ static_read.py, msi.py # existing (keep)
-│  │  ├─ evidence.py            # BUILT: evidence pack (D*, I*, F1 = installer facts as key = value lines)
+│  │  ├─ evidence.py            # BUILT: evidence pack (D*, I*, U1 = the app's UI text, F1 = installer facts)
+│  │  ├─ ui_text.py             # BUILT (D60): readable UI text from the installer's binaries → U1
 │  │  ├─ agent1.py              # BUILT: Agent 1 + retry + writers + ENV-000 injection
 │  │  ├─ selfcheck.py           # BUILT
 │  │  └─ templates/             # BUILT: understanding.md.j2
@@ -392,7 +405,8 @@ CodeBase/
 │     │                         #        RecordingMCPServer + CallRecorder (traces every MCP call, saves screenshots)
 │     ├─ preflight.py           # BUILT: admin, Windows-MCP tool list, ENV-000, host not running (v2.3)
 │     ├─ host.py                # BUILT (v2.3): find the host executable, running host PIDs, kill the host
-│     ├─ ui_tree.py             # BUILT (v2.3): Snapshot UI-tree parser for window_in_ui / seen_in_ui
+│     ├─ ui_tree.py             # BUILT (v2.3): Snapshot UI-tree parser for window_in_ui
+│     ├─ judge.py               # BUILT (D58): the LLM judge for `judged` UI claims
 │     ├─ observations.py        # BUILT: observations.json (shared by preflight and record_observation)
 │     ├─ agent2.py              # BUILT: Agent 2 + Windows-MCP + record_observation + limits
 │     ├─ guardrails.py          # BUILT: PowerShell allow-list, Registry/FileSystem/Process/App/Wait rules

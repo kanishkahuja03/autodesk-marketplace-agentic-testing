@@ -128,9 +128,35 @@ def _load001(d: dict) -> dict:
     return next(t for t in d["testcases"] if t["id"] == "LOAD-001")
 
 
+LOAD002_QUOTE = "The “Export” button is used to export"
+
+
+def with_load002(d: dict) -> None:
+    """The entry point's documented items, and LOAD-002 claiming they are reachable."""
+    d["summary"]["entry_point"]["items"] = ["Export"]
+    d["summary"]["entry_point"]["sources"].append({"doc": "D2", "line": 10, "quote": LOAD002_QUOTE})
+    load002 = {**copy.deepcopy(_load001(d)), "id": "LOAD-002", "preconditions": ["LOAD-000", "LOAD-001"],
+               "source": {"doc": "D2", "line": 10, "quote": LOAD002_QUOTE}}
+    load002["expected"][0]["value"] = "The entry point contains a button called “Export”"
+    d["testcases"].insert(3, load002)
+
+
 def test_good_load_plan_passes():
     assert load_errors() == []
-    assert load_errors(lambda d: d["summary"]["entry_point"].update(items=["Export"])) == []
+    assert load_errors(with_load002) == []  # the items are documented, so LOAD-002 is there too
+
+
+def test_load002_is_required_when_items_are_documented():
+    errors = load_errors(lambda d: d["summary"]["entry_point"].update(items=["Export"]))
+    assert any("also write LOAD-002" in e for e in errors)
+
+
+def test_claim_names_must_come_from_the_quotes():
+    # names in a claim are checked against its quotes; the guide doesn't name 'Info'
+    assert any("the claim names 'Info'" in e for e in load_errors(
+        lambda d: _load001(d)["expected"][0].update(value="The tab has a button 'Info'")))
+    assert load_errors(lambda d: _load001(d)["expected"][0].update(
+        value="The host shows the app's new tab, called 'P&ID Exporter'")) == []  # apostrophe in "app's" is no quote
 
 
 def test_load_needs_a_host_with_host_process():
@@ -148,13 +174,15 @@ def test_load_test_shape_rules():
     for edit in (lambda d: d["summary"]["entry_point"].update(kind="command"),
                  lambda d: d["summary"].update(entry_point=None)):
         assert any("needs summary.entry_point with kind" in e for e in load_errors(edit))
-    assert any("exactly ['LOAD-000']" in e for e in load_errors(lambda d: _load001(d).update(preconditions=["INST-001"])))
-    assert any("must equal summary.entry_point.label" in e
-               for e in load_errors(lambda d: _load001(d)["expected"][0].update(value="Exporter")))
+    assert any("preconditions must be ['LOAD-000']" in e
+               for e in load_errors(lambda d: _load001(d).update(preconditions=["INST-001"])))
+    assert any("exactly one expected check, 'judged'" in e
+               for e in load_errors(lambda d: _load001(d)["expected"][0].update(check="equals")))
 
-    def two(d):
-        d["testcases"].insert(3, {**_load001(d), "id": "LOAD-002"})
-    assert any("at most one LOAD test" in e for e in load_errors(two))
+    def three(d):
+        with_load002(d)
+        d["testcases"].insert(4, {**_load001(d), "id": "LOAD-003"})
+    assert any("at most two LOAD tests" in e for e in load_errors(three))
 
 
 def test_load000_is_reserved_and_ui_checks_only_in_load():

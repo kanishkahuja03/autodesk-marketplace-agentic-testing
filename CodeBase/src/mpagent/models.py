@@ -155,6 +155,8 @@ class InstallerFacts(BaseModel):
     registry: list[RegistryEntry] = []
     bundles: list[BundleManifest] = []
     embedded_documents: list[EmbeddedDocument] = []
+    ui_text: EmbeddedDocument | None = Field(
+        default=None, description="U1: readable UI text from the app's binaries (hints, FUNCTIONAL_TESTS_PLAN.md L22)")
     notable_files: list[str] = Field(default_factory=list, description="Files worth attention, with the reason")
     warnings: list[str] = []
 
@@ -208,11 +210,14 @@ class Check(str, Enum):
     NOT_EXISTS = "not_exists"
     CONTAINS = "contains"
     MATCHES = "matches"
-    # decided by code from the raw Snapshot UI tree, not from Agent 2's value (FUNCTIONAL_TESTS_PLAN.md L4, L11)
+    # decided by code from the raw Snapshot UI tree, not from Agent 2's value (FUNCTIONAL_TESTS_PLAN.md L11)
     WINDOW_IN_UI = "window_in_ui"  # value: regex of a window/document title inside the host window
-    SEEN_IN_UI = "seen_in_ui"  # value: exact element name (e.g. a ribbon tab label) inside the host window
+    # decided by the LLM judge from the test's screenshots (FUNCTIONAL_TESTS_PLAN.md L20, L21)
+    JUDGED = "judged"  # value: the documented UI claim in plain words
 
-UI_CHECKS = {Check.WINDOW_IN_UI, Check.SEEN_IN_UI}
+
+# Checks decided from the evidence, never from Agent 2's own value
+UI_CHECKS = {Check.WINDOW_IN_UI, Check.JUDGED}
 
 
 class Citation(BaseModel):
@@ -373,6 +378,23 @@ class HostProcess(BaseModel):
     new_document: str = Field(description="Regular expression for the title of a new default document")
 
 
+class JudgeVerdict(str, Enum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+
+
+class Judgement(BaseModel):
+    """The LLM judge's answer for one UI claim (FUNCTIONAL_TESTS_PLAN.md L20-L25). Strict output schema."""
+
+    verdict: JudgeVerdict = Field(description="PASS, FAIL or NEEDS_REVIEW, by the rule in the judge skill")
+    shown: str = Field(description="What the evidence actually shows about the claim, in plain words")
+    differences: list[str] = Field(description="How the shown UI differs from the claim; empty if it doesn't")
+    findings: list[str] = Field(description="Findings for the report, e.g. a documentation mismatch; may be empty")
+    evidence: list[str] = Field(description="The screenshot file(s) the verdict rests on, exactly as listed in the input")
+    reason: str = Field(description="One short paragraph: why this verdict")
+
+
 class TestResult(BaseModel):
     """Verdict for one test, decided by code (verdict engine), written to results.json."""
 
@@ -384,6 +406,8 @@ class TestResult(BaseModel):
     checks: list[CheckResult]
     evidence: list[str]
     notes: str | None
+    judgement: Judgement | None = None
+    findings: list[str] = []
 
 
 class RunResults(BaseModel):

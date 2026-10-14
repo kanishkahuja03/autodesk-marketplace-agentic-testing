@@ -39,21 +39,6 @@ def test_json_list_snapshot_text_is_decoded():
     assert ui_tree.nodes(json.dumps([REAL])) == ui_tree.nodes(REAL)
 
 
-def test_seen_in_ui_exact_name_inside_host_window_only():
-    assert ui_tree.seen_in_ui([REAL], "^Programs and Features$", "control panel home") == "found"
-    assert ui_tree.seen_in_ui([REAL], "^Programs and Features$", "Control Panel") == "found"  # a split button
-    assert ui_tree.seen_in_ui([REAL], "^Programs and Features$", "Panel Home") == "not_found"  # no substrings
-    assert ui_tree.seen_in_ui([HOST], MAIN, "P&ID Exporter") == "found"  # whitespace collapsed
-    assert ui_tree.seen_in_ui([HOST], MAIN, "Search P&ID Exporter tools") == "not_found"  # in the browser window
-    assert ui_tree.seen_in_ui([HOST], MAIN, "AutoCAD Plant 3D 2027 - [Drawing1.dwg]") == "not_found"  # the window itself
-    assert ui_tree.seen_in_ui([REAL], MAIN, "P&ID Exporter") == "no_host_window"
-
-
-def test_accelerator_ampersands_are_ignored():
-    assert ui_tree.label_key("P&&ID  Exporter") == ui_tree.label_key("p&id exporter") == "pid exporter"
-    assert ui_tree.seen_in_ui([REAL], "^Programs and Features$", "Help") == "found"  # button "&Help"
-
-
 def test_window_in_ui_matches_host_title_or_names_inside_it():
     assert ui_tree.window_in_ui([HOST], MAIN, MAIN)
     assert ui_tree.window_in_ui([HOST], MAIN, r"Drawing\d+(\.dwg)?")

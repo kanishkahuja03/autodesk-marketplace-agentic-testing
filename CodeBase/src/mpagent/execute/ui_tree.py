@@ -75,22 +75,7 @@ def host_windows(snapshot_text: str, main_window: str) -> list[list[Node]]:
     return found
 
 
-def label_key(text: str) -> str:
-    """Compare labels loosely: case, runs of whitespace and '&' accelerator markers don't matter."""
-    return re.sub(r"\s+", " ", text.replace("&", "")).strip().casefold()
-
-
 def window_in_ui(texts: list[str], main_window: str, pattern: str) -> bool:
     """True if a host main window exists whose title, or a node name inside it, matches `pattern`."""
     rx = re.compile(pattern, re.IGNORECASE)
     return any(rx.search(n.name) for t in texts for w in host_windows(t, main_window) for n in w)
-
-
-def seen_in_ui(texts: list[str], main_window: str, label: str) -> str:
-    """'found' (an element inside a host window is named exactly `label`), 'not_found' (host window seen,
-    no such element) or 'no_host_window'."""
-    wanted = label_key(label)
-    windows = [w for t in texts for w in host_windows(t, main_window)]
-    if not windows:
-        return "no_host_window"
-    return "found" if any(label_key(n.name) == wanted for w in windows for n in w[1:]) else "not_found"

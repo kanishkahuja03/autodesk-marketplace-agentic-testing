@@ -2,6 +2,7 @@
 
   D1..  documents from the input folder (S0)
   I1..  documents embedded in the installer (S1)
+  U1    UI text found in the app's binaries (hints, FUNCTIONAL_TESTS_PLAN.md L22)
   F1    installer_facts.json rendered as one `key = value` per line (ARCHITECTURE.md §4)
 
 Agent 1 cites these IDs; the self-check verifies each quote against the same text.
@@ -46,6 +47,9 @@ def build_sources(run_dir: Path, manifest: IntakeManifest, facts: InstallerFacts
     sources = [Source(d.doc_id, d.source_file, _read(run_dir / d.text_file)) for d in manifest.documents]
     sources += [Source(d.doc_id, f"{d.name} (inside the installer)", _read(run_dir / d.text_file))
                 for d in facts.embedded_documents]
+    if facts.ui_text:
+        sources.append(Source(facts.ui_text.doc_id, "UI text found in the app's binaries (hints: may also contain "
+                              "text of related products or libraries)", _read(run_dir / facts.ui_text.text_file)))
     sources.append(Source(FACTS_ID, "installer facts (read from the installer without running it)",
                           "\n".join(facts_lines(facts))))
     return sources

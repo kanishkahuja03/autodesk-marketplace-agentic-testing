@@ -9,6 +9,7 @@ Reads the installer file *without running it* and writes installer_facts.json:
 Every fact here comes from the installer file. The machine is not inspected.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -18,6 +19,7 @@ from pathlib import Path
 
 from mpagent.design.intake import extract_text, sha256_of
 from mpagent.design.msi import MsiDatabase
+from mpagent.design.ui_text import BINARY_EXTENSIONS, MAX_BINARY_BYTES, build_ui_text
 from mpagent.models import (
     BundleCommand,
     BundleComponent,
@@ -266,7 +268,9 @@ def extract_from_cabinet(db: MsiDatabase, msi_path: Path, media_rows, file_rows,
 
     cab_dir = out_dir / "_cabinets"
     cab_dir.mkdir(parents=True, exist_ok=True)
-    expand = Path(shutil.which("expand.exe") or r"C:\Windows\System32\expand.exe")
+    # Always Windows' own expand.exe: with Git's tools on PATH, `which` finds Git's unrelated text tool
+    # of the same name, and every file failed to unpack
+    expand = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "expand.exe"
     extracted: dict[str, Path] = {}
     try:
         for cab, files in wanted.items():
@@ -277,15 +281,20 @@ def extract_from_cabinet(db: MsiDatabase, msi_path: Path, media_rows, file_rows,
                 cab_path = msi_path.parent / cab
                 if not cab_path.exists():
                     continue
-            for f in files:
-                key = f["File"]
+            out_dir.mkdir(parents=True, exist_ok=True)
+            before = {p.name for p in out_dir.iterdir()}
+            # many files: one call for the whole cabinet (one call per file took ~1 s each)
+            patterns = ["*"] if len(files) > 5 else [f["File"] for f in files]
+            for pattern in patterns:
                 subprocess.run(
-                    [str(expand), str(cab_path), f"-F:{key}", str(out_dir)],
+                    [str(expand), str(cab_path), f"-F:{pattern}", str(out_dir)],
                     capture_output=True,
                     text=True,
-                    timeout=120,
+                    timeout=300,
                     check=False,
                 )
+            for f in files:
+                key = f["File"]
                 raw = out_dir / key
                 if raw.exists():
                     final = out_dir / long_name(f["FileName"])
@@ -293,6 +302,10 @@ def extract_from_cabinet(db: MsiDatabase, msi_path: Path, media_rows, file_rows,
                         final = out_dir / f"{key}_{long_name(f['FileName'])}"
                     raw.replace(final)
                     extracted[key] = final
+            keep = before | {p.name for p in extracted.values()}
+            for leftover in out_dir.iterdir():  # files of the cabinet nobody asked for
+                if leftover.is_file() and leftover.name not in keep:
+                    leftover.unlink()
     finally:
         shutil.rmtree(cab_dir, ignore_errors=True)
     return extracted
@@ -348,7 +361,9 @@ def read_msi(msi_path: Path, run_dir: Path, facts: InstallerFacts) -> None:
             for r in db.rows("Registry")
         ]
 
-        # Unpack only the plug-in manifest(s) and readable documents.
+        # Unpack only the plug-in manifest(s), readable documents and the binaries (read for UI text, then deleted).
+        binaries = [f for f in file_rows if Path(long_name(f["FileName"])).suffix.lower() in BINARY_EXTENSIONS
+                    and int(f["FileSize"] or 0) <= MAX_BINARY_BYTES]
         to_extract = [
             f
             for f in file_rows
@@ -360,11 +375,30 @@ def read_msi(msi_path: Path, run_dir: Path, facts: InstallerFacts) -> None:
         ]
         extract_dir = run_dir / "installer_extract"
         extracted = extract_from_cabinet(db, msi_path, db.rows("Media"), to_extract, extract_dir) if to_extract else {}
+        bin_dir = extract_dir / "_binaries"
+        bins = extract_from_cabinet(db, msi_path, db.rows("Media"), binaries, bin_dir) if binaries else {}
 
     for f in to_extract:
         if f["File"] not in extracted:
             facts.warnings.append(f"could not unpack {long_name(f['FileName'])} from the installer")
     add_extracted(extracted, file_paths, run_dir, facts)
+    try:
+        add_ui_text([(file_paths.get(k, p.name), p.read_bytes()) for k, p in sorted(bins.items(), key=lambda kv: kv[0])],
+                    run_dir, facts)
+    finally:
+        shutil.rmtree(run_dir / "installer_extract" / "_binaries", ignore_errors=True)  # never keep untrusted binaries
+
+
+def add_ui_text(binaries: list[tuple[str, bytes]], run_dir: Path, facts: InstallerFacts) -> None:
+    """Turn the binaries' readable UI text into the citable source U1 (documents/U1_ui_text.txt)."""
+    text = build_ui_text(binaries)
+    if not text:
+        return
+    rel = Path("documents") / "U1_ui_text.txt"
+    (run_dir / rel).parent.mkdir(exist_ok=True)
+    (run_dir / rel).write_text(text, encoding="utf-8")
+    facts.ui_text = EmbeddedDocument(doc_id="U1", name="UI text found in the app's binaries", install_path=None,
+                                     text_file=rel.as_posix(), line_count=text.count("\n"), char_count=len(text))
 
 
 def add_extracted(extracted: dict[str, Path], install_paths: dict[str, str], run_dir: Path, facts: InstallerFacts) -> None:
@@ -406,11 +440,14 @@ def read_zip_bundle(zip_path: Path, run_dir: Path, facts: InstallerFacts) -> Non
     extract_dir = run_dir / "installer_extract"
     extract_dir.mkdir(parents=True, exist_ok=True)
     extracted: dict[str, Path] = {}
+    binaries: list[tuple[str, bytes]] = []
     with zipfile.ZipFile(zip_path) as zf:
         for info in zf.infolist():
             if info.is_dir():
                 continue
             name = info.filename.replace("/", "\\")
+            if Path(name).suffix.lower() in BINARY_EXTENSIONS and info.file_size <= MAX_BINARY_BYTES:
+                binaries.append((f"[copied manually]\\{name}", zf.read(info)))  # read as bytes only
             facts.files.append(InstalledFile(name=Path(name).name, install_path=f"[copied manually]\\{name}", size_bytes=info.file_size))
             lower = name.lower()
             readable = Path(lower).suffix in DOC_EXTENSIONS and info.file_size <= MAX_EMBEDDED_DOC_BYTES
@@ -420,6 +457,7 @@ def read_zip_bundle(zip_path: Path, run_dir: Path, facts: InstallerFacts) -> Non
                 extracted[name] = target
     facts.install_roots = ["[copied manually]"]
     add_extracted(extracted, {k: f"[copied manually]\\{k}" for k in extracted}, run_dir, facts)
+    add_ui_text(binaries, run_dir, facts)
 
 
 # ---------------------------------------------------------------- main entry

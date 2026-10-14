@@ -5,14 +5,16 @@ Precedence for each test:
   ERROR         no observation, the test was not executed, an expected key is missing / null, or a UI check
                 has no Snapshot / no host window to look in
   FAIL          any expected check fails
-  NEEDS_REVIEW  a `seen_in_ui` label wasn't in the host window's UI tree, but a screenshot exists
+  NEEDS_REVIEW  the judge couldn't decide a UI claim from the evidence
   PASS          every expected check holds
 Values are compared as text after light normalising, so 0 == "0" and True == "true".
-UI checks (`window_in_ui`, `seen_in_ui`, FUNCTIONAL_TESTS_PLAN.md L4, L5, L11, L17) are decided from the raw
-Snapshot UI-tree files attached to the observation; Agent 2's own value is kept only for the report.
+`window_in_ui` (FUNCTIONAL_TESTS_PLAN.md L11, L17) is decided from the raw Snapshot UI-tree files attached to
+the observation. `judged` UI claims (L20-L25) are decided by the LLM judge from the attached screenshots, inside
+guards kept by code. Agent 2's own value is kept only for the report.
 """
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from mpagent.design.selfcheck import PLACEHOLDER, texts_of
@@ -22,6 +24,8 @@ from mpagent.models import (
     Check,
     CheckResult,
     Expectation,
+    Judgement,
+    JudgeVerdict,
     Observation,
     Scalar,
     Status,
@@ -33,6 +37,9 @@ from mpagent.models import (
 ALWAYS_KNOWN = {"INSTALLER_PATH", "RUN_DIR"}  # given to Agent 2 by code
 UI_TEXT_SUFFIX = "_Snapshot_ui.txt"  # raw Snapshot text saved by the call recorder
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg")
+
+# (test, its judged expectation, its observation) -> the judge's answer; raises if the call fails
+JudgeFn = Callable[[TestCase, Expectation, Observation], Judgement]
 
 
 def norm(value: Scalar) -> str:
@@ -63,10 +70,11 @@ def check_one(e: Expectation, observed: Scalar) -> bool:
 
 
 class UiContext:
-    """Where UI checks look: the run folder (for the attached Snapshot files) and the host's main-window regex."""
+    """Where UI checks look: the run folder (for the attached evidence files), the host's main-window regex,
+    and the judge for `judged` claims (None: no judge available, e.g. in unit tests)."""
 
-    def __init__(self, run_dir: Path | None, main_window: str | None):
-        self.run_dir, self.main_window = run_dir, main_window
+    def __init__(self, run_dir: Path | None, main_window: str | None, judge: JudgeFn | None = None):
+        self.run_dir, self.main_window, self.judge = run_dir, main_window, judge
 
     def texts(self, obs: Observation) -> list[str]:
         if self.run_dir is None:
@@ -105,9 +113,12 @@ def _evaluate_test(t: TestCase, obs: Observation | None, resolved_env: set[str] 
     evidence = list(obs.evidence) if obs else []
     notes = obs.notes if obs else None
 
+    judgement: Judgement | None = None
+
     def result(status: Status, checks: list[CheckResult], reason: str | None) -> TestResult:
         joined = "; ".join(x for x in (reason, notes) if x) or None
-        return TestResult(test_id=t.id, origin=t.origin, status=status, checks=checks, evidence=evidence, notes=joined)
+        return TestResult(test_id=t.id, origin=t.origin, status=status, checks=checks, evidence=evidence, notes=joined,
+                          judgement=judgement, findings=list(judgement.findings) if judgement else [])
 
     not_passed = [f"{p} is {r.status.value}" for p, r in preconditions.items() if r.status is not Status.PASS]
     if not_passed:
@@ -127,6 +138,12 @@ def _evaluate_test(t: TestCase, obs: Observation | None, resolved_env: set[str] 
     ui_errors: list[str] = []
     for e in t.expected:
         expected = e.values if e.check is Check.IN else e.value
+        if e.check is Check.JUDGED:
+            check, problem, judgement = _judged_check(t, e, obs, ui, values.get(e.key))
+            checks.append(check)
+            if problem:
+                ui_errors.append(problem)
+            continue
         if e.check in UI_CHECKS:
             check, problem = _ui_check(e, obs, ui, values.get(e.key))
             checks.append(check)
@@ -144,30 +161,54 @@ def _evaluate_test(t: TestCase, obs: Observation | None, resolved_env: set[str] 
         return result(Status.ERROR, checks, "; ".join(reasons))
     if any(not c.ok and not c.needs_review for c in checks):
         return result(Status.FAIL, checks, None)
+    judged_reason = f"judge: {judgement.reason}" if judgement else None
+    if any(not c.ok and not c.needs_review for c in checks):
+        return result(Status.FAIL, checks, judged_reason)
     if any(c.needs_review for c in checks):
-        return result(Status.NEEDS_REVIEW, checks, "label not found in the host window's UI tree; check the screenshot")
-    return result(Status.PASS, checks, None)
+        return result(Status.NEEDS_REVIEW, checks, judged_reason or "check the screenshot")
+    return result(Status.PASS, checks, judged_reason)
+
+
+def _judged_check(t: TestCase, e: Expectation, obs: Observation, ui: UiContext,
+                  reported: Scalar) -> tuple[CheckResult, str | None, Judgement | None]:
+    """A UI claim decided by the judge, inside code guards (FUNCTIONAL_TESTS_PLAN.md L25): never without
+    screenshots, never on a screenshot that isn't attached to this test, a failed call is an ERROR."""
+
+    def make(observed: Scalar, ok: bool = False, review: bool = False) -> CheckResult:
+        return CheckResult(key=e.key, check=e.check, expected=e.value, observed=observed, ok=ok,
+                           needs_review=review, reported=reported)
+
+    shots = [r for r in obs.evidence if r.lower().endswith(IMAGE_SUFFIXES)]
+    if not shots:
+        return make(None), f"{e.key}: no screenshot attached; a UI claim is never judged from notes alone", None
+    if ui.judge is None:
+        return make(None), f"{e.key}: no judge available to decide the UI claim", None
+    try:
+        judgement = ui.judge(t, e, obs)
+    except Exception as ex:  # noqa: BLE001 - a judge problem is this test's ERROR, never a crashed run
+        return make(None), f"{e.key}: the judge call failed ({type(ex).__name__}: {ex})", None
+    names = {s: s for s in shots} | {Path(s).name: s for s in shots}
+    cited = [names[x.replace("\\", "/")] for x in judgement.evidence if x.replace("\\", "/") in names]
+    if not cited:
+        problem = (f"{e.key}: the judge named no screenshot attached to this test "
+                   f"({', '.join(judgement.evidence) or 'none'})")
+        return make(judgement.shown), problem, judgement
+    judgement = judgement.model_copy(update={"evidence": cited})
+    check = make(judgement.shown, ok=judgement.verdict is JudgeVerdict.PASS,
+                 review=judgement.verdict is JudgeVerdict.NEEDS_REVIEW)
+    return check, None, judgement
 
 
 def _ui_check(e: Expectation, obs: Observation, ui: UiContext, reported: Scalar) -> tuple[CheckResult, str | None]:
-    """A UI check decided from the attached raw Snapshot texts. Returns the check and an ERROR reason, if any."""
+    """`window_in_ui`, decided from the attached raw Snapshot texts. Returns the check and an ERROR reason, if any."""
     texts = ui.texts(obs)
 
-    def make(observed: Scalar, ok: bool, review: bool = False) -> CheckResult:
-        return CheckResult(key=e.key, check=e.check, expected=e.value, observed=observed, ok=ok,
-                           needs_review=review, reported=reported)
+    def make(observed: Scalar, ok: bool) -> CheckResult:
+        return CheckResult(key=e.key, check=e.check, expected=e.value, observed=observed, ok=ok, reported=reported)
 
     if not ui.main_window:
         return make(None, False), f"{e.key}: the host notes have no main_window pattern"
     if not texts:
         return make(None, False), f"{e.key}: no Snapshot was attached to this observation"
-    if e.check is Check.WINDOW_IN_UI:
-        ok = ui_tree.window_in_ui(texts, ui.main_window, str(e.value))
-        return make("seen" if ok else "not seen", ok), None
-    found = ui_tree.seen_in_ui(texts, ui.main_window, str(e.value))
-    if found == "no_host_window":
-        return make("no host window", False), f"{e.key}: the host window is in none of the Snapshots"
-    if found == "found":
-        return make("seen", True), None
-    has_screenshot = any(r.lower().endswith(IMAGE_SUFFIXES) for r in obs.evidence)
-    return make("not seen", False, review=has_screenshot), None
+    ok = ui_tree.window_in_ui(texts, ui.main_window, str(e.value))
+    return make("seen" if ok else "not seen", ok), None

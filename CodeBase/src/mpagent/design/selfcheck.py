@@ -25,7 +25,7 @@ BUILT_IN_IDS = {BUILT_IN_ENV_ID, BUILT_IN_LOAD_ID}
 ID_PATTERN = re.compile(r"^(ENV|INST|LOAD|UNIN)-\d{3}$")
 PLACEHOLDER = re.compile(r"\$\{([A-Za-z0-9_]+)\}")
 USER_PROFILE_PATH = re.compile(r"[A-Za-z]:\\Users\\", re.IGNORECASE)
-NEEDS_VALUE = {Check.EQUALS, Check.NOT_EQUALS, Check.CONTAINS, Check.MATCHES, Check.SEEN_IN_UI}
+NEEDS_VALUE = {Check.EQUALS, Check.NOT_EQUALS, Check.CONTAINS, Check.MATCHES, Check.JUDGED}
 HOST_NONE, HOST_UNKNOWN = "none", "unknown"
 # Keys about the app's own installation; an ENV test using them checks the wrong thing (run 20261013-145150)
 APP_INSTALL_KEYS = {"install_exit_code", "uninstall_exit_code", "uninstall_entry_exists", "preinstalled_entry_exists"}
@@ -124,16 +124,23 @@ def check_plan(plan: TestPlan, sources: list[Source], host_ids: Iterable[str],
     return errors
 
 
+# Names in a claim are written in quotes; an apostrophe inside a word (plug-in's) is not a quote
+QUOTED_NAME = re.compile(r"[\"“”](.{2,80}?)[\"“”]|(?<![A-Za-z])['‘’](.{2,80}?)['‘’](?![A-Za-z])")
+MAX_AGENT_LOAD_TESTS = 2  # LOAD-001: the entry point is present; LOAD-002: its documented items are reachable
+
+
 def _check_load(plan: TestPlan, load_host: bool, errors: list[str], check_citation) -> None:
-    """LOAD rules (FUNCTIONAL_TESTS_PLAN.md §4.1): at most one agent LOAD test, for a visible entry point,
-    looking for exactly the quoted label, depending only on LOAD-000; UNIN never depends on LOAD."""
+    """LOAD rules (FUNCTIONAL_TESTS_PLAN.md §4.1, §9): LOAD-001 for a visible entry point, LOAD-002 when its items
+    are documented; each has one `judged` claim whose quoted names come from its sources; UNIN never depends
+    on LOAD."""
     ep = plan.summary.entry_point
+    ep_quotes = ""
     if ep is not None:
         for i, c in enumerate(ep.sources):
             check_citation(f"summary.entry_point.sources[{i}]", c)
-        quoted = " ".join(normalise(c.quote) for c in ep.sources)
+        ep_quotes = " ".join(normalise(c.quote) for c in ep.sources)
         for name in [ep.label, *ep.items]:
-            if normalise(name) not in quoted:
+            if normalise(name) not in ep_quotes:
                 errors.append(f"summary.entry_point: {name!r} is not in any quote of entry_point.sources; "
                               "copy names exactly from a source (or leave them out and add an open question)")
     load_ids = {t.id for t in plan.testcases if t.category is Category.LOAD} | {BUILT_IN_LOAD_ID}
@@ -145,33 +152,45 @@ def _check_load(plan: TestPlan, load_host: bool, errors: list[str], check_citati
                     errors.append(f"{t.id}: check '{e.check.value}' is only for LOAD tests")
         if t.category is Category.UNIN and set(t.preconditions) & load_ids:
             errors.append(f"{t.id}: UNIN tests depend only on INST tests, never on LOAD (the uninstall is always tested)")
+    visible = ep is not None and ep.kind in VISIBLE_ENTRY_POINTS
     if not load_tests:
-        if load_host and ep is not None and ep.kind in VISIBLE_ENTRY_POINTS:
+        if load_host and visible:
             # run 20261013-172934: the card was filled but no LOAD test written
             errors.append(f"summary.entry_point is a visible {ep.kind.value}: write the LOAD test LOAD-001 "
-                          "(seen_in_ui with the label, preconditions ['LOAD-000'])")
+                          "(one 'judged' claim, preconditions ['LOAD-000'])")
         return
     if not load_host:
         errors.append(f"{load_tests[0].id}: this host has no LOAD support (host notes without host_process); "
                       "write no LOAD tests")
         return
-    if len(load_tests) > 1:
-        errors.append(f"write at most one LOAD test (the entry point check); found {', '.join(t.id for t in load_tests)}")
-    visible = ", ".join(sorted(k.value for k in VISIBLE_ENTRY_POINTS))
+    if len(load_tests) > MAX_AGENT_LOAD_TESTS:
+        errors.append("write at most two LOAD tests: LOAD-001 (the entry point is present) and LOAD-002 "
+                      f"(its documented items are reachable); found {', '.join(t.id for t in load_tests)}")
+    if not visible:
+        kinds = ", ".join(sorted(k.value for k in VISIBLE_ENTRY_POINTS))
+        errors.append(f"{load_tests[0].id}: a LOAD test needs summary.entry_point with kind {kinds}; otherwise write "
+                      "no LOAD test and add an open question")
+    elif ep.items and len(load_tests) < MAX_AGENT_LOAD_TESTS:
+        errors.append("summary.entry_point.items are documented: also write LOAD-002, a 'judged' claim that "
+                      "these items are reachable in the entry point (preconditions ['LOAD-000'] or "
+                      "['LOAD-000', 'LOAD-001'])")
     for t in load_tests:
-        if ep is None or ep.kind not in VISIBLE_ENTRY_POINTS:
-            errors.append(f"{t.id}: a LOAD test needs summary.entry_point with kind {visible}; otherwise write "
-                          "no LOAD test and add an open question")
-        if t.preconditions != [BUILT_IN_LOAD_ID]:
-            errors.append(f"{t.id}: preconditions must be exactly ['{BUILT_IN_LOAD_ID}']")
-        ui = [e for e in t.expected if e.check is Check.SEEN_IN_UI]
-        if len(ui) != 1 or len(t.expected) != 1:
-            errors.append(f"{t.id}: a LOAD test has exactly one expected check, 'seen_in_ui' with the entry point label")
-        elif ep is not None and normalise(str(ui[0].value)) != normalise(ep.label):
-            errors.append(f"{t.id}: seen_in_ui value {ui[0].value!r} must equal summary.entry_point.label {ep.label!r}")
+        if BUILT_IN_LOAD_ID not in t.preconditions or any(p not in load_ids for p in t.preconditions):
+            errors.append(f"{t.id}: preconditions must be ['{BUILT_IN_LOAD_ID}'] (LOAD-002 may also depend on LOAD-001)")
         for e in t.expected:
             if e.check is Check.WINDOW_IN_UI:
                 errors.append(f"{t.id}: 'window_in_ui' is reserved for the built-in {BUILT_IN_LOAD_ID}")
+        judged = [e for e in t.expected if e.check is Check.JUDGED]
+        if len(judged) != 1 or len(t.expected) != 1:
+            errors.append(f"{t.id}: a LOAD test has exactly one expected check, 'judged', whose value is the "
+                          "documented claim in plain words")
+            continue
+        support = " ".join(x for x in ((normalise(t.source.quote) if t.source else ""), ep_quotes) if x)
+        for m in QUOTED_NAME.finditer(str(judged[0].value or "")):
+            name = m.group(1) or m.group(2)
+            if normalise(name) not in support:
+                errors.append(f"{t.id}: the claim names {name!r}, which is in none of its quotes (the test's source "
+                              "or summary.entry_point.sources); copy names exactly from a source")
 
 
 def _check_expectations(t: TestCase, errors: list[str]) -> None:

@@ -71,8 +71,10 @@ Examples only. You decide how to handle each dialog (host-interaction skill, sec
 - The new drawing is named `Drawing1.dwg` (or `Drawing2.dwg`, …). It appears as a document tab and in the main window title. *(verify)*
 
 ### Where app entry points appear
-- Plug-in ribbon tabs appear next to the built-in tabs (Home, Insert, …) once a drawing is open. Their names should be in the Snapshot's UI tree. *(verify that plug-in tabs are exposed)*
-- Some plug-ins add their tab only in certain workspaces. *(verify for the default workspace)*
+- Plug-in ribbon tabs appear next to the built-in tabs (Home, Insert, …) once a drawing is open, also in a plain drawing from the default template. *Seen 2026-10-14.*
+- **Ribbon tabs are not in the Snapshot's UI tree** (only a "Ribbon" pane with two unnamed buttons is listed). *Seen 2026-10-13/14.* The screenshots are what shows them, so take one of every state.
+- A plug-in tab can hold groups whose contents only show when the group or its drop-down is opened. Opening them only reveals the UI.
+- Some plug-ins add their tab only in certain workspaces. *(not seen yet)*
 
 ### Close without saving (Phase 2)
 In Phase 1 the host is closed with `Process kill` on `acad.exe` only. Never save a drawing.

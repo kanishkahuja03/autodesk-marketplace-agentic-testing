@@ -173,18 +173,24 @@ def test_snapshot_text_is_saved_in_full_and_attached(tmp_path):
     assert calls.take_pending() == ["evidence/001_Snapshot_ui.txt"]  # only Snapshots are saved as text
 
 
-def test_ui_tests_need_a_snapshot_before_recording(tmp_path):
+def test_load_tests_need_their_evidence_before_recording(tmp_path):
+    # LOAD-000 is decided from the UI tree (needs a Snapshot); LOAD-001 is judged from screenshots (L25)
     trace = Trace(tmp_path)
     calls = CallRecorder(tmp_path, trace)
     obs = agent2.ObservationRecorder(tmp_path, load_plan(), calls, trace)
-    label = [KeyValue(key="entry_point_label", value="P&ID Exporter")]
+    seen = [KeyValue(key="entry_point_seen", value="a tab 'P&ID Connector'")]
 
-    assert "Take a Snapshot of the host window first" in obs.record("LOAD-001", True, label, [], None)
-    assert obs.record("LOAD-001", False, [KeyValue(key="entry_point_label", value=None)], [], "install failed") == \
-        "Recorded LOAD-001."  # not executed: no Snapshot needed
+    assert "Take a Screenshot of each state" in obs.record("LOAD-001", True, seen, [], None)
     calls.record("Snapshot", {}, mcp_result(SimpleNamespace(type="text", text="UI Tree:\n")))
-    assert obs.record("LOAD-001", True, label, [], None) == "Recorded LOAD-001."
-    assert load_observations(tmp_path)[0].evidence == ["evidence/001_Snapshot_ui.txt"]
+    assert "Take a Screenshot of each state" in obs.record("LOAD-001", True, seen, [], None)  # a tree isn't enough
+    calls.record("Screenshot", {}, mcp_result(SimpleNamespace(type="image", data=PNG, mimeType="image/png")))
+    assert obs.record("LOAD-001", True, seen, [], None) == "Recorded LOAD-001."
+    assert load_observations(tmp_path)[0].evidence == ["evidence/001_Snapshot_ui.txt", "evidence/002_Screenshot_1.png"]
+
+    host = [KeyValue(key=k, value=v) for k, v in (("host_started", True), ("document_opened", True),
+                                                   ("error_dialog_seen", False), ("load_prompt_seen", False))]
+    assert "Take a Snapshot of the host window first" in obs.record("LOAD-000", True, host, [], None)
+    assert obs.record("LOAD-000", False, host, [], "install failed") == "Recorded LOAD-000."  # not executed: fine
 
 
 def test_host_interaction_skill_and_host_block_only_with_load(tmp_path):

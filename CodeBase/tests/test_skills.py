@@ -11,11 +11,13 @@ from mpagent.models import HostProcess
 SKILLS = Path(__file__).parent.parent / "skills"
 SRC = Path(__file__).parent.parent / "src" / "mpagent"
 EXPECTED = ["test-design/SKILL.md", "hosts/autocad-plant3d.md", "hosts/none.md",
-            "execute/windows-installer.md", "execute/evidence.md", "execute/host-interaction.md"]
+            "execute/windows-installer.md", "execute/evidence.md", "execute/host-interaction.md",
+            "execute/judge.md"]
 # Generic parts must not name a product (FUNCTIONAL_TESTS_PLAN.md, rule kept from D1)
 PRODUCT_NAMES = re.compile(r"plant ?3d|autocad|acad|p&id", re.IGNORECASE)
 GENERIC_FILES = [SKILLS / "execute" / "host-interaction.md", SRC / "hostnotes.py", SRC / "execute" / "host.py",
-                 SRC / "execute" / "ui_tree.py", SRC / "execute" / "verdict.py"]
+                 SRC / "execute" / "ui_tree.py", SRC / "execute" / "verdict.py",
+                 SKILLS / "execute" / "judge.md", SRC / "execute" / "judge.py", SRC / "design" / "ui_text.py"]
 
 
 @pytest.mark.parametrize("rel", EXPECTED)
@@ -54,12 +56,14 @@ def test_required_coverage_keys_are_in_test_design_skill():
 
 def test_load_rules_are_in_the_skills():
     design = (SKILLS / "test-design" / "SKILL.md").read_text(encoding="utf-8")
-    assert "`LOAD-000`" in design and "seen_in_ui" in design and '["LOAD-000"]' in design
+    assert "`LOAD-000`" in design and "check: judged" in design and '["LOAD-000"]' in design
+    assert "`LOAD-002`" in design and "`U1`" in design and "seen_in_ui" not in design
     host = (SKILLS / "execute" / "host-interaction.md").read_text(encoding="utf-8")
     assert 'mode="launch_executable"' in host and 'mode="kill"' in host and "one-time" in host
     assert "You decide what to do with each one" in host and "smallest lasting effect" in host
     assert "Never choose \"Always" in host and "Document every dialog in the `notes`" in host
     assert "timeout` at most 105" in host and "Then stop the LOAD tests" not in host  # no blanket stop rule
+    assert "only **reveal**" in host and "Never trigger anything that acts" in host  # generic exploration (L24)
 
 
 def test_uninstall_is_silent_and_files_are_read_only():

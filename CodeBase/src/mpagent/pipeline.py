@@ -154,7 +154,7 @@ def _execution_side(design: Design, settings: Settings) -> RunResults | None:
             cleanup(design.run_dir, design.facts)
         except Exception as e:  # noqa: BLE001 - cleanup must never hide the real outcome
             log.error("CLEANUP: failed with %s: %s — manual cleanup may be needed", type(e).__name__, e)
-        run_results = _verdicts_and_report(design)
+        run_results = _verdicts_and_report(design, settings)
     return run_results
 
 
@@ -176,15 +176,18 @@ def _kill_host(design: Design, started: datetime) -> None:
         log.warning("HOST: %d crash record(s) saved to %s", len(crashes), CRASH_EVENTS_FILE)
 
 
-def _verdicts_and_report(design: Design) -> RunResults | None:
+def _verdicts_and_report(design: Design, settings: Settings | None = None) -> RunResults | None:
     log.info("Verdicts and report: start")
     try:
-        run_results = write_report(design.plan, design.run_dir)
+        run_results = write_report(design.plan, design.run_dir, settings)
     except Exception as e:  # noqa: BLE001 - a report problem must not hide the Agent 2 outcome
         log.error("REPORT: failed with %s: %s", type(e).__name__, e)
         return None
     for r in run_results.results:
         log.info("  %-8s %-7s %s", r.test_id, r.status.value, r.notes or "")
+    for r in run_results.results:  # e.g. documentation mismatches found by the judge (D63)
+        for f in r.findings:
+            log.warning("  FINDING %s: %s", r.test_id, f)
     log.info("Verdicts and report: done -> results.json, report.html")
     return run_results
 

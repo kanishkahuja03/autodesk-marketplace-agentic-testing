@@ -13,6 +13,7 @@ from mpagent.models import (
     Category,
     Check,
     EntryPointKind,
+    Judgement,
     Observation,
     Origin,
     Status,
@@ -101,7 +102,7 @@ def test_plan_loads_from_yaml():
 
 def test_load_category_ui_checks_and_needs_review_exist():
     assert Category("LOAD") is Category.LOAD and Status("NEEDS_REVIEW") is Status.NEEDS_REVIEW
-    assert {Check("window_in_ui"), Check("seen_in_ui")} == UI_CHECKS
+    assert {Check("window_in_ui"), Check("judged")} == UI_CHECKS
 
 
 def test_plan_round_trips_through_yaml_and_json():
@@ -119,7 +120,7 @@ def test_plan_rejects_unknown_check():
         TestPlan.model_validate(data)
 
 
-@pytest.mark.parametrize("model", [TestPlan, Agent2Result])
+@pytest.mark.parametrize("model", [TestPlan, Agent2Result, Judgement])
 def test_agent_outputs_are_strict_schemas(model):
     assert AgentOutputSchema(model).is_strict_json_schema()
 

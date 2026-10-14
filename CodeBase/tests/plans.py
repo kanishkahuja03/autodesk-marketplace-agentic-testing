@@ -63,9 +63,10 @@ def load_plan_data() -> dict:
         "kind": "ribbon_tab", "label": "P&ID Exporter", "items": [], "use_context": None,
         "sources": [{"doc": "D2", "line": 7, "quote": TAB_QUOTE}]}
     load = _test("LOAD-001", "LOAD", "", ["LOAD-000"],
-                 ["With the new document open, take a Snapshot and look for the ribbon tab 'P&ID Exporter'"],
-                 ["entry_point_label"],
-                 [{"key": "entry_point_label", "check": "seen_in_ui", "value": "P&ID Exporter", "values": None}])
+                 ["With a new document open, find the app's entry point and take a Screenshot of it"],
+                 ["entry_point_seen"],
+                 [{"key": "entry_point_seen", "check": "judged",
+                   "value": "After installation the host shows a new tab called “P&ID Exporter”", "values": None}])
     load["source"] = {"doc": "D2", "line": 7, "quote": TAB_QUOTE}
     data["testcases"].insert(2, load)
     return data

@@ -11,7 +11,7 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an 
 ## ADR Index
 
 ### Documents
-- `./ARCHITECTURE.md` : V2.3 build plan. Decisions D1–D57, the one-F5 flow, agents, preflight, guardrails, cleanup, data contracts, skills, tech stack, code layout, build steps.
+- `./ARCHITECTURE.md` : V2.3 build plan. Decisions D1–D63, the one-F5 flow, agents, preflight, guardrails, cleanup, data contracts, skills, tech stack, code layout, build steps.
 - `./FUNCTIONAL_TESTS_PLAN.md` : LOAD test plan v3 (agreed in the grill-me review, 2026-10-13; branch `Dev-FunctionalTest`), with the reasoning behind D40–D52 and the Phase 2 (FUNC) outline.
 - `./AGENT_TOOLING_REVIEW.md` : Agent 1 components and Agent 2 Windows-MCP tools, one by one, with keep/drop recommendations for team review.
 - `./ARCHITECTURE_COMPARISON.md` : Our approach vs the `AppStore automation/` approach. Pros and cons, and what V2 took from each.
@@ -24,7 +24,7 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an 
 - **ADR-003 LLM provider:** enterprise OpenAI API, with the model name set in `.env`. Gemini dropped. Cost is not a constraint for the POC. *(D2)*
 - **ADR-004 Agent framework:** OpenAI Agents SDK (Python). It supplies the agent loop, MCP client, structured output and tool filtering. *(D3)*
 - **ADR-005 Machine interaction:** Agent 2 drives the machine only through Windows-MCP (UI, Registry, FileSystem, Process, PowerShell), using a 13-tool allow-list enforced in two places. There is no action catalogue of our own. The one local tool is `record_observation` (ADR-025), which only writes a file. *(D5, D6)*
-- **ADR-006 Verdict by code:** Agent 2 reports raw observations only. Code compares them with each test's `expected` checks and sets PASS / FAIL / NEEDS_REVIEW / BLOCKED / ERROR. The LLM never sets a status. *(D7)*
+- **ADR-006 Verdict by code:** Agent 2 reports raw observations only. Code compares them with each test's `expected` checks and sets PASS / FAIL / NEEDS_REVIEW / BLOCKED / ERROR. *Updated 2026-10-14:* claims about what the UI shows are decided by an evidence-bound LLM judge instead (ADR-041). The LLM never sets a status. *(D7)*
 - **ADR-007 Demo scope:** ENV, INST, LOAD and UNIN tests (LOAD added 2026-10-13, ADR-033). Fully automatic except one y/n review of the test cases (ADR-040). Demo app: P&ID Connector Exporter. *(D8, D9, D14)*
 - **ADR-008 Reuse existing intake:** keep the existing `intake.py` and installer static read (`static_read.py`, `msi.py`). *(D10)*
 - **ADR-009 Local tracing only:** OpenAI tracing is disabled. Every LLM turn and MCP call is logged to `trace.jsonl` in the run folder. *(D11)*
@@ -67,3 +67,6 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an 
 ### Decisions from 2026-10-14
 - **ADR-039 Dialogs decided by Agent 2:** Agent 2 judges each dialog (notice, load prompt, error, crash, lasting change, unclear) and picks the button with the smallest lasting effect; never "Always …" or settings changes. Evidence = the attached screenshots; the record = the LOAD test's `notes`. No extra guardrail or file. Replaces the blanket "stop at any other dialog" rule. *(D56, replaces D49)*
 - **ADR-040 Test-case review in the console:** after Agent 1, the console lists the test cases and asks y/n before anything touches the machine; `n` stops the run. No console → the run continues. Requested by the seniors for the recorded demo. *(D57, updates D9, D16)*
+- **ADR-041 LLM judge for UI claims:** a separate, fresh model call (same `OPENAI_MODEL`) decides whether a documented UI claim holds, from the test's screenshots, Snapshot text and Agent 2's notes. Agent 2 never grades its own work; facts stay with code. *(D58, D7; built 2026-10-14)*
+- **ADR-042 Claims and the app's own UI text:** UI tests carry the documented claim (`judged`), not an expected string; LOAD-001 (entry point) and LOAD-002 (its items). S1 extracts the app's own UI text from the installer's binaries as citable source `U1`. Matching only `U1` = PASS with a "documentation mismatch" finding. *(D59–D61; built 2026-10-14)*
+- **ADR-043 Generic exploration and findings:** Agent 2 opens only what reveals UI, never what acts, with screenshots and notes; the report shows each judgement and a Findings section. *(D62, D63; built 2026-10-14)*

@@ -1,13 +1,13 @@
 ---
 name: host-interaction
-description: How Agent 2 runs the LOAD tests - start the host application, decide how to handle dialogs (with evidence and notes), open a new default document, take Snapshots for the code checks, and kill the host. Generic; host specifics come from the host notes. Used by Agent 2 only.
+description: How Agent 2 runs the LOAD tests - start the host application, decide how to handle dialogs (with evidence and notes), open a new default document, explore the app's entry point without running anything (screenshots for the reviewer), and kill the host. Generic; host specifics come from the host notes. Used by Agent 2 only.
 ---
 
 # Host interaction: LOAD tests (Agent 2)
 
 The LOAD tests check that the app under test is **loaded by its host application**. Your input has a **"Host program"** block with the only program you may start, its exact arguments, its process names and two title patterns. The host notes tell you what the host looks like.
 
-**Code decides these tests from the Snapshot's UI tree**, not from your values. Your job: bring the host into the right state, then take a `Snapshot` so code can look. Report honestly what you saw anyway.
+**You don't decide these tests.** LOAD-000 is decided by code from the Snapshot's UI tree; the app's entry point (LOAD-001, LOAD-002) by an independent reviewer from your screenshots. Your job: bring the host into the right state, take the Snapshots and Screenshots, and report honestly what you saw.
 
 ## 1. Only after a successful install
 Do the ENV and INST tests first. The guardrail rejects starting the host before the installer has run. Start the host **only if** the install exit code you recorded for the INST test is one of that test's expected values (e.g. `0` or `3010`). If the install failed, or the "Host program" block says NOT FOUND, don't start anything. Record each LOAD test with `executed: false` and a short note (e.g. "install failed"), then go on to the UNIN tests.
@@ -20,7 +20,7 @@ Do the ENV and INST tests first. The guardrail rejects starting the host before 
 A window such as "<host> Error Report", "… has stopped working", "Error Aborting", or the main window disappearing means the host **crashed**.
 1. Take a `Screenshot`, then `Process` kill the host (section 7).
 2. Start it **once more** (section 2). Crashes at start can be one-offs.
-3. If it crashes again, record LOAD-000 with **`executed: true`** (you did carry out the steps), `error_dialog_seen: true`, `host_started` / `document_opened` as you saw them, and the window titles in `notes`. Record LOAD-001 with `executed: false` ("host crashed"). Then go on to UNIN.
+3. If it crashes again, record LOAD-000 with **`executed: true`** (you did carry out the steps), `error_dialog_seen: true`, `host_started` / `document_opened` as you saw them, and the window titles in `notes`. Record the other LOAD tests with `executed: false` ("host crashed"). Then go on to UNIN.
 4. If the second start works, continue normally and write "host crashed on the first start" in LOAD-000's `notes`.
 
 Code collects the host's crash records from Windows by itself. You don't need to look for logs.
@@ -48,10 +48,15 @@ Hosts and apps often show dialogs at start. **You decide what to do with each on
 2. Wait a few seconds (`Wait`), then take a **`Snapshot`** of the host window. Code looks in this Snapshot.
 3. Record LOAD-000: `host_started` (the main window appeared), `document_opened` (a new document appeared), `error_dialog_seen` (an error, warning or crash was shown; sections 3 and 4), `load_prompt_seen` (`true` / `false`), and in `notes` every dialog you handled (section 4).
 
-## 6. LOAD-001: the app's entry point
-1. Take another **`Snapshot`** of the host window, then a **`Screenshot`**. `record_observation` refuses a LOAD test without a Snapshot taken since the previous record.
-2. Look in the Snapshot for the entry point label from the test (e.g. a tab name). **Don't click it, and don't click the app's buttons.**
-3. Record LOAD-001: `entry_point_label` = the label exactly as you saw it, or `null` if you didn't see it.
+## 6. LOAD-001, LOAD-002: explore the app's entry point
+These tests are **claims** from the app's documents (the test's `expected` value). **An independent reviewer decides them from your screenshots**, so your job is to show the reviewer everything the claim is about.
+1. Find the app's entry point in the host, using the claim and the notes of the earlier tests.
+2. **Explore it like a tester, without running anything:**
+   - Open things that only **reveal** more of the app's UI, for example: select a tab, expand a group, open a drop-down or a menu.
+   - **Never trigger anything that acts:** something that runs a feature, exports, opens a website, a file dialog or a settings window, or changes or saves anything. If you can't tell whether something reveals or acts, leave it closed.
+   - Close what you opened (e.g. `Esc`) before opening the next thing.
+3. **Take a `Screenshot` of every state you reach**: the entry point itself, and each revealed part. `record_observation` refuses these tests without a Screenshot since the previous record.
+4. Record each test with its `observe` key = your short description of what you saw, names exactly as shown (e.g. *"tab 'X' with groups 'A' (items: B, C) and 'D'"*), or `null` if you couldn't find it. In `notes`, say what you opened and how. This is your description, not the decision.
 
 ## 7. Close the host (always, before UNIN)
 - `Process` with `mode="kill"` and `name` = the host's process name from "Host program". Do this even after an error or a stop.

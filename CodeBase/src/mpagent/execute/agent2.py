@@ -23,9 +23,9 @@ from mpagent.execute.observations import load_observations, save_observation
 from mpagent.execute.windows_mcp import CallRecorder, windows_mcp_server
 from mpagent.hostnotes import host_process
 from mpagent.models import (
-    UI_CHECKS,
     Agent2Result,
     Category,
+    Check,
     InstallerFacts,
     KeyValue,
     Observation,
@@ -123,7 +123,8 @@ class ObservationRecorder:
         self.run_dir, self.recorder, self.trace, self.policy = run_dir, recorder, trace, policy
         self.install_tests = {t.id for t in plan.testcases if "install_exit_code" in t.observe}
         self.ids = {t.id for t in plan.testcases}
-        self.ui_tests = {t.id for t in plan.testcases if any(e.check in UI_CHECKS for e in t.expected)}
+        self.tree_tests = {t.id for t in plan.testcases if any(e.check is Check.WINDOW_IN_UI for e in t.expected)}
+        self.judged_tests = {t.id for t in plan.testcases if any(e.check is Check.JUDGED for e in t.expected)}
 
     def record(self, test_id: str, executed: bool, observed: list[KeyValue], evidence: list[str],
                notes: str | None) -> str:
@@ -141,10 +142,14 @@ class ObservationRecorder:
             # run 20261013-175002: INST-001 was recorded as executed although msiexec /i never ran
             return (f"Not recorded: {test_id} observes install_exit_code, but the installer hasn't run in this run. "
                     "Run the silent install first (windows-installer skill), then record the exit code from the log.")
-        if executed and test_id in self.ui_tests and not self.recorder.has_pending_snapshot():
+        if executed and test_id in self.tree_tests and not self.recorder.has_pending_snapshot():
             # the UI tree decides this test (FUNCTIONAL_TESTS_PLAN.md L5); it needs a Snapshot taken for it
             return (f"Not recorded: {test_id} is checked from the UI tree, but you took no Snapshot since the "
                     "previous record_observation. Take a Snapshot of the host window first, then record again.")
+        if executed and test_id in self.judged_tests and not self.recorder.has_pending_image():
+            # a judge decides this test from its screenshots (FUNCTIONAL_TESTS_PLAN.md L25)
+            return (f"Not recorded: {test_id} is judged from screenshots, but you took no Screenshot since the "
+                    "previous record_observation. Take a Screenshot of each state you explored, then record again.")
         missing = [e for e in evidence if not self._exists_in_run_dir(e)]
         if missing:  # evidence must be real files, never names of files that should have been written
             self.trace.write("record_observation_rejected", test_id=test_id, missing_evidence=missing)

@@ -105,6 +105,9 @@ class CallRecorder:
     def has_pending_snapshot(self) -> bool:
         return any(p.endswith(UI_TEXT_SUFFIX) for p in self.pending)
 
+    def has_pending_image(self) -> bool:
+        return any(p.lower().endswith((".png", ".jpg", ".jpeg")) for p in self.pending)
+
 
 class RecordingMCPServer(MCPServerStdio):
     recorder: CallRecorder
