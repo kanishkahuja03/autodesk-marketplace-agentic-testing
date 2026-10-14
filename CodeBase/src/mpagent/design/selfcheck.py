@@ -21,7 +21,8 @@ from mpagent.models import (
 
 BUILT_IN_ENV_ID = "ENV-000"
 BUILT_IN_LOAD_ID = "LOAD-000"  # added by code when the host notes have host_process (FUNCTIONAL_TESTS_PLAN.md L2)
-BUILT_IN_IDS = {BUILT_IN_ENV_ID, BUILT_IN_LOAD_ID}
+BUILT_IN_UNIN_ID = "UNIN-000"  # "nothing left behind", decided by code after Agent 2 (ARCHITECTURE.md D64)
+BUILT_IN_IDS = {BUILT_IN_ENV_ID, BUILT_IN_LOAD_ID, BUILT_IN_UNIN_ID}
 ID_PATTERN = re.compile(r"^(ENV|INST|LOAD|UNIN)-\d{3}$")
 PLACEHOLDER = re.compile(r"\$\{([A-Za-z0-9_]+)\}")
 USER_PROFILE_PATH = re.compile(r"[A-Za-z]:\\Users\\", re.IGNORECASE)

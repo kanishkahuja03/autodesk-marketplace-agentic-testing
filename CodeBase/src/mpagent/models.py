@@ -331,6 +331,7 @@ class Observation(BaseModel):
     observed: list[KeyValue] = Field(description="One entry per key in the test's `observe` list")
     evidence: list[str] = Field(description="Paths relative to the run folder, e.g. 'evidence/INST-001_install.log'")
     notes: str | None
+    findings: list[str] = Field(default_factory=list, description="Set by code only, e.g. leftovers (UNIN-000)")
 
 
 class Agent2Result(BaseModel):
@@ -376,6 +377,8 @@ class HostProcess(BaseModel):
     processes: list[str] = Field(description="Process image names, e.g. ['host.exe']")
     main_window: str = Field(description="Regular expression for the host's main window title")
     new_document: str = Field(description="Regular expression for the title of a new default document")
+    profile_ignore: list[str] = Field(default_factory=list,
+                                      description="Regexes of places the host itself writes to (ignored by UNIN-000)")
 
 
 class JudgeVerdict(str, Enum):

@@ -15,6 +15,7 @@ from pathlib import Path
 
 from mpagent.config import Settings
 from mpagent.design.selfcheck import BUILT_IN_ENV_ID
+from mpagent.execute.footprint import save_before
 from mpagent.execute.host import running_pids
 from mpagent.execute.observations import save_observation
 from mpagent.execute.windows_mcp import (
@@ -115,3 +116,7 @@ def run_preflight(run_dir: Path, facts: InstallerFacts, settings: Settings, host
             which = ", ".join(f"{name} PID {pid}" for pid, name in sorted(running.items()))
             raise PreflightError(f"the host is running ({which}) — close it and run again")
         log.info("  host not running: yes")
+
+    # the baseline for UNIN-000: what the machine looks like before the install (ARCHITECTURE.md D64)
+    save_before(run_dir, facts.install_roots)
+    log.info("  footprint before the install: saved")

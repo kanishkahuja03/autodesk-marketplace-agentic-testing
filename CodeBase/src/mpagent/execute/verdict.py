@@ -118,7 +118,8 @@ def _evaluate_test(t: TestCase, obs: Observation | None, resolved_env: set[str] 
     def result(status: Status, checks: list[CheckResult], reason: str | None) -> TestResult:
         joined = "; ".join(x for x in (reason, notes) if x) or None
         return TestResult(test_id=t.id, origin=t.origin, status=status, checks=checks, evidence=evidence, notes=joined,
-                          judgement=judgement, findings=list(judgement.findings) if judgement else [])
+                          judgement=judgement,
+                          findings=list(judgement.findings) if judgement else list(obs.findings) if obs else [])
 
     not_passed = [f"{p} is {r.status.value}" for p, r in preconditions.items() if r.status is not Status.PASS]
     if not_passed:

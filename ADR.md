@@ -11,7 +11,7 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an 
 ## ADR Index
 
 ### Documents
-- `./ARCHITECTURE.md` : V2.3 build plan. Decisions D1–D63, the one-F5 flow, agents, preflight, guardrails, cleanup, data contracts, skills, tech stack, code layout, build steps.
+- `./ARCHITECTURE.md` : V2.3 build plan. Decisions D1–D66, the one-F5 flow, agents, preflight, guardrails, cleanup, data contracts, skills, tech stack, code layout, build steps.
 - `./FUNCTIONAL_TESTS_PLAN.md` : LOAD test plan v3 (agreed in the grill-me review, 2026-10-13; branch `Dev-FunctionalTest`), with the reasoning behind D40–D52 and the Phase 2 (FUNC) outline.
 - `./AGENT_TOOLING_REVIEW.md` : Agent 1 components and Agent 2 Windows-MCP tools, one by one, with keep/drop recommendations for team review.
 - `./ARCHITECTURE_COMPARISON.md` : Our approach vs the `AppStore automation/` approach. Pros and cons, and what V2 took from each.
@@ -70,3 +70,5 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an 
 - **ADR-041 LLM judge for UI claims:** a separate, fresh model call (same `OPENAI_MODEL`) decides whether a documented UI claim holds, from the test's screenshots, Snapshot text and Agent 2's notes. Agent 2 never grades its own work; facts stay with code. *(D58, D7; built 2026-10-14)*
 - **ADR-042 Claims and the app's own UI text:** UI tests carry the documented claim (`judged`), not an expected string; LOAD-001 (entry point) and LOAD-002 (its items). S1 extracts the app's own UI text from the installer's binaries as citable source `U1`. Matching only `U1` = PASS with a "documentation mismatch" finding. *(D59–D61; built 2026-10-14)*
 - **ADR-043 Generic exploration and findings:** Agent 2 opens only what reveals UI, never what acts, with screenshots and notes; the report shows each judgement and a Findings section. *(D62, D63; built 2026-10-14)*
+- **ADR-044 Nothing left behind:** a built-in UNIN-000 compares the machine before the install with the state after the uninstall (registry Software keys, user/data/program folders, install roots). Program leftovers FAIL; leftover user settings are PASS with a finding. Code reports, never deletes. *(D64)*
+- **ADR-045 Covered UI and the judge's client:** Agent 2 uncovers the claimed UI with view-only, undone changes; the judge treats covered elements as NEEDS_REVIEW ("hidden is not missing"). The judge uses its own OpenAI client and event loop per call. *(D65, D66)*

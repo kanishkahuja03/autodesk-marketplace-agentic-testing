@@ -13,7 +13,7 @@ Call `record_observation` **right after you finish each test**, before starting 
 - `evidence`: paths **relative to the run folder** of files that back the values (e.g. `evidence/install.log`). Screenshots and Snapshots you take are saved and attached by the system automatically; you don't need to list them.
 - `notes`: short and factual, e.g. "found under HKLM WOW6432Node", "Uninstall button was disabled".
 
-Run **every** test in the plan, in order (ENV → INST → LOAD → UNIN), even if an earlier test looked wrong (for LOAD after a failed install, see the host-interaction skill). Code applies the preconditions afterwards. ENV-000 has already been checked by code; don't repeat it.
+Run **every** test in the plan, in order (ENV → INST → LOAD → UNIN), even if an earlier test looked wrong (for LOAD after a failed install, see the host-interaction skill). Code applies the preconditions afterwards. ENV-000 has already been checked by code; don't repeat it. UNIN-000 ("nothing left behind") is checked by code after you finish; don't record it.
 
 **Record each test once.** A test that is recorded with `executed: true` can't be replaced by a later `executed: false` record, and an identical second record is ignored. When every test is recorded, finish with your final answer; don't go back to earlier tests.
 

@@ -53,7 +53,7 @@
     <summary><b>{{ r.test_id }}</b> {{ t.title }} — <span class="status {{ r.status.value }}">{{ r.status.value }}</span></summary>
     <div class="body">
       {% if t.source %}<div class="muted">Source {{ t.source.doc }}{% if t.source.line %}:{{ t.source.line }}{% endif %}</div>
-      <blockquote>{{ t.source.quote }}</blockquote>{% else %}<div class="muted">Built-in test ({{ "run by code" if t.category.value == "ENV" else "written by code, run by Agent 2" }})</div>{% endif %}
+      <blockquote>{{ t.source.quote }}</blockquote>{% else %}<div class="muted">Built-in test ({{ "run by code" if t.steps and t.steps[0].startswith("Built-in check run by code") else "written by code, run by Agent 2" }})</div>{% endif %}
       {% if t.steps %}<div class="muted">Steps</div><ul>{% for s in t.steps %}<li>{{ s }}</li>{% endfor %}</ul>{% endif %}
       {% if r.checks %}<div class="wrap"><table>
         <tr><th>Key</th><th>Check</th><th>Expected</th><th>Observed</th><th></th></tr>

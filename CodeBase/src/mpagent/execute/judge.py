@@ -6,6 +6,7 @@ Agent 2's notes (as the executor's description, not proof). Agent 2 never grades
 the answer (an attached screenshot must be named, errors become ERROR) are in the verdict engine.
 """
 
+import asyncio
 import base64
 import json
 from pathlib import Path
@@ -81,10 +82,17 @@ def build_request(plan: TestPlan, t: TestCase, e: Expectation, obs: Observation,
 
 
 def make_judge(plan: TestPlan, run_dir: Path, settings: Settings, main_window: str | None):
-    """A JudgeFn for the verdict engine: one fresh model call per judged claim, traced to trace.jsonl."""
-    agent = Agent(name="ui-claim-judge", instructions=SKILL.read_text(encoding="utf-8"), output_type=Judgement,
-                  model=settings.agent_model())
+    """A JudgeFn for the verdict engine: one fresh model call per judged claim, traced to trace.jsonl.
+    Each call gets its own event loop and its own OpenAI client, because Agent 2 ran before in an
+    asyncio.run() loop that is closed by now (run 20261014-153924)."""
+    instructions = SKILL.read_text(encoding="utf-8")
     trace = Trace(run_dir)
+
+    async def ask(content: list[dict]) -> Judgement:
+        agent = Agent(name="ui-claim-judge", instructions=instructions, output_type=Judgement,
+                      model=settings.fresh_model())
+        result = await Runner.run(agent, [{"role": "user", "content": content}], max_turns=2)
+        return result.final_output
 
     def judge(t: TestCase, e: Expectation, obs: Observation) -> Judgement:
         text, shots = build_request(plan, t, e, obs, run_dir, main_window)
@@ -95,8 +103,7 @@ def make_judge(plan: TestPlan, run_dir: Path, settings: Settings, main_window: s
             content.append({"type": "input_image", "image_url": f"data:{IMAGE_TYPES[Path(rel).suffix.lower()]};base64,{data}",
                             "detail": "high"})
         trace.write("judge_request", test_id=t.id, input=text, images=shots)
-        result = Runner.run_sync(agent, [{"role": "user", "content": content}], max_turns=2)
-        judgement: Judgement = result.final_output
+        judgement = asyncio.run(ask(content))
         trace.write("judge_response", test_id=t.id, judgement=json.loads(judgement.model_dump_json()))
         log.info("  judge %s: %s — %s", t.id, judgement.verdict.value, judgement.shown[:160])
         return judgement

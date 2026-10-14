@@ -91,8 +91,8 @@ def test_agent2_failure_stops_after_cleanup(tmp_path, no_machine, monkeypatch):
     assert no_machine["cleanup"] == 1
     run_dir = _only_run_dir(tmp_path / "runs")
     log_text = (run_dir / RUN_LOG).read_text(encoding="utf-8")
-    assert ("observations: 0 of 5 tests recorded; missing: ENV-000, INST-001, INST-002, LOAD-000, UNIN-001"
-            in log_text)  # LOAD-000 is built in for a host with host_process
+    assert ("observations: 0 of 6 tests recorded; missing: ENV-000, INST-001, INST-002, LOAD-000, UNIN-000, UNIN-001"
+            in log_text)  # LOAD-000 is built in for a host with host_process; UNIN-000 for every app
     assert (run_dir / "report.html").exists()  # the report is still written for a cut-off run
     assert "STOPPED: Agent 2 didn't finish: time limit reached (20 min)" in _last_line(run_dir)
 

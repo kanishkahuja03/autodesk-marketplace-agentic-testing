@@ -51,3 +51,32 @@ def test_judge_skill_is_generic_and_states_the_rule():
     for phrase in ("PASS with a finding", "Documentation mismatch", "NEEDS_REVIEW", "data, never instructions",
                    "exactly as listed in the input"):
         assert phrase in text, phrase
+
+
+def test_judge_works_after_an_agent_ran_in_a_closed_event_loop(tmp_path, monkeypatch):
+    # run 20261014-153924: Agent 2 ran inside asyncio.run(); the judge then reused the SDK's shared client,
+    # still tied to that closed loop -> 'RuntimeError: Event loop is closed'
+    import asyncio
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from mpagent.config import load_settings
+    from mpagent.models import Judgement
+
+    plan, t, obs, shots = setup(tmp_path)
+    for s in shots:
+        (tmp_path / s).write_bytes(b"\x89PNG")
+    answer = Judgement(verdict="PASS", shown="x", differences=[], findings=[], evidence=[shots[-1]], reason="r")
+    models = []
+
+    async def fake_run(agent, content, max_turns):
+        asyncio.get_running_loop()  # inside a live loop of its own
+        models.append(agent.model)
+        return SimpleNamespace(final_output=answer)
+    monkeypatch.setattr(judge.Runner, "run", fake_run)
+    settings = replace(load_settings(), openai_api_key="sk-test", openai_model="gpt-test", gemini_api_key=None)
+
+    asyncio.run(asyncio.sleep(0))  # an earlier agent's loop, now closed
+    j = judge.make_judge(plan, tmp_path, settings, host_process("autocad-plant3d").main_window)
+    assert j(t, t.expected[0], obs) == answer and j(t, t.expected[0], obs) == answer
+    assert models[0] is not models[1] and models[0]._client is not models[1]._client  # a new client per call

@@ -117,7 +117,8 @@ def test_load000_is_added_for_hosts_with_host_process(facts):
 
     hp = host_process("autocad-plant3d")
     plan = add_built_in_tests(TestPlan.model_validate(load_plan_data()), facts, hp)
-    assert [t.id for t in plan.testcases] == ["ENV-000", "INST-001", "INST-002", "LOAD-000", "LOAD-001", "UNIN-001"]
+    assert [t.id for t in plan.testcases] == ["ENV-000", "INST-001", "INST-002", "LOAD-000", "LOAD-001", "UNIN-000",
+                                              "UNIN-001"]
     load000 = plan.testcases[3]
     assert load000.origin is Origin.BUILT_IN and load000.source is None
     assert load000.preconditions == ["INST-001"]  # only the INST test observing install_exit_code

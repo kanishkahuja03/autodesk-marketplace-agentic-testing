@@ -56,6 +56,19 @@ class Settings:
         return OpenAIChatCompletionsModel(model=self.gemini_model, openai_client=client)
 
 
+    def fresh_model(self):
+        """Like agent_model(), but always with its own new OpenAI client. Needed for a call made after another
+        agent ran in an asyncio.run() loop: the SDK's shared client stays tied to that closed loop
+        (run 20261014-153924: 'Event loop is closed' in the judge)."""
+        self.require_openai()
+        if self.uses_temporary_gemini:
+            return self.agent_model()  # builds a new client every time already
+        from agents import OpenAIResponsesModel
+        from openai import AsyncOpenAI
+
+        return OpenAIResponsesModel(model=self.openai_model, openai_client=AsyncOpenAI(api_key=self.openai_api_key))
+
+
 GEMINI_OPENAI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 

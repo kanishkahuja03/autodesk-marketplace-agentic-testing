@@ -15,7 +15,12 @@ from ruamel.yaml import YAML
 
 from mpagent.config import PROJECT_ROOT, Settings
 from mpagent.design.evidence import Source, build_sources, render_pack
-from mpagent.design.selfcheck import BUILT_IN_ENV_ID, BUILT_IN_LOAD_ID, check_plan
+from mpagent.design.selfcheck import (
+    BUILT_IN_ENV_ID,
+    BUILT_IN_LOAD_ID,
+    BUILT_IN_UNIN_ID,
+    check_plan,
+)
 from mpagent.hostnotes import host_process
 from mpagent.models import (
     Category,
@@ -137,9 +142,26 @@ def add_built_in_tests(plan: TestPlan, facts: InstallerFacts, host: HostProcess 
     tests = [env000, *tests]
     if host is not None:
         tests.append(load000(tests, host))
+    tests.append(unin000(tests))
     # built-in tests first in their category; stable, so Agent 1's order is kept otherwise
     tests.sort(key=lambda t: (CATEGORY_ORDER.index(t.category), t.origin is not Origin.BUILT_IN))
     return plan.model_copy(update={"testcases": tests})
+
+
+def unin000(tests: list[TestCase]) -> TestCase:
+    """UNIN-000 "nothing left behind" (ARCHITECTURE.md D64): code compares the machine before the install with the
+    state after the uninstall. Program leftovers fail it; leftover user settings become findings."""
+    uninstalls = [t.id for t in tests if t.category is Category.UNIN
+                  and {"uninstall_exit_code", "uninstall_entry_exists"} & set(t.observe)]
+    return TestCase(
+        id=BUILT_IN_UNIN_ID, origin=Origin.BUILT_IN, category=Category.UNIN,
+        title="Nothing of the app is left behind after the uninstall", source=None, preconditions=uninstalls,
+        steps=[("Built-in check run by code after Agent 2: compare the registry Software keys and the data and "
+                "program folders before the install with the state after the uninstall")],
+        observe=["program_leftovers", "settings_leftovers"],
+        expected=[Expectation(key="program_leftovers", check=Check.EQUALS, value=0, values=None)],
+        priority=Priority.P2,
+    )
 
 
 def load000(tests: list[TestCase], host: HostProcess) -> TestCase:

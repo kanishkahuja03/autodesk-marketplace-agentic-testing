@@ -27,7 +27,7 @@ FACTS = InstallerFacts(installer_file="x.msi", installer_type="msi", sha256="0",
                        properties={"ProductCode": "{DFA9AB30-EDDB-4E96-BFF7-086145A9E483}", "ProductName": "App"})
 
 
-def plan() -> TestPlan:  # ENV-000, INST-001 (exit code), INST-002 (entry exists), UNIN-001 (entry gone)
+def plan() -> TestPlan:  # ENV-000, INST-001 (exit code), INST-002 (entry exists), UNIN-000 (leftovers), UNIN-001
     return add_built_in_tests(TestPlan.model_validate(good_plan_data()), FACTS)
 
 
@@ -38,7 +38,8 @@ def obs(tid, executed=True, **values):
 
 def happy() -> list[Observation]:
     return [obs("ENV-000", preinstalled_entry_exists=False), obs("INST-001", install_exit_code=0),
-            obs("INST-002", uninstall_entry_exists=True), obs("UNIN-001", uninstall_entry_exists=False)]
+            obs("INST-002", uninstall_entry_exists=True), obs("UNIN-001", uninstall_entry_exists=False),
+            obs("UNIN-000", program_leftovers=0, settings_leftovers=0)]
 
 
 def statuses(results):
@@ -118,8 +119,8 @@ def test_report_files_are_written(tmp_path):
     (tmp_path / RESULT_FILE).write_text(json.dumps({"done": True, "env": []}), encoding="utf-8")
     run = write_report(plan(), tmp_path)
 
-    assert run.counts == {"PASS": 4, "FAIL": 0, "NEEDS_REVIEW": 0, "BLOCKED": 0, "ERROR": 0} and run.agent2_finished
-    assert json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))["counts"]["PASS"] == 4
+    assert run.counts == {"PASS": 5, "FAIL": 0, "NEEDS_REVIEW": 0, "BLOCKED": 0, "ERROR": 0} and run.agent2_finished
+    assert json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))["counts"]["PASS"] == 5
     html = (tmp_path / "report.html").read_text(encoding="utf-8")
     assert "<title>Validation Report</title>" in html and 'id="UNIN-001"' in html
     assert "Agent 2 did not finish" not in html
@@ -129,7 +130,7 @@ def test_report_after_cut_off_run_marks_missing_tests_error(tmp_path):
     save_observation(tmp_path, happy()[0])
     run = write_report(plan(), tmp_path)  # no agent2_result.json: Agent 2 didn't finish
     assert not run.agent2_finished
-    assert run.counts["ERROR"] == 1 and run.counts["BLOCKED"] == 2  # INST-001 ERROR, the rest blocked by it
+    assert run.counts["ERROR"] == 1 and run.counts["BLOCKED"] == 3  # INST-001 ERROR, the rest blocked by it
     assert "Agent 2 did not finish" in (tmp_path / "report.html").read_text(encoding="utf-8")
 
 
@@ -231,7 +232,7 @@ def test_report_shows_the_judgement_and_findings(tmp_path):
     save_observation(tmp_path, ui_obs(tmp_path, "LOAD-001", HOST, entry_point_seen="a tab 'P&ID Connector'"))
     mismatch = "Documentation mismatch: the documents say 'P&ID Exporter', the app shows 'P&ID Connector'"
     run = write_report(load_plan(), tmp_path, judge=stand_in_judge(judgement("NEEDS_REVIEW", findings=[mismatch])))
-    assert run.counts["NEEDS_REVIEW"] == 1 and run.counts["PASS"] == 5
+    assert run.counts["NEEDS_REVIEW"] == 1 and run.counts["PASS"] == 6
     html = (tmp_path / "report.html").read_text(encoding="utf-8")
     assert 'class="status NEEDS_REVIEW"' in html and "Decided by the LLM judge" in html
     assert "<h2>Findings</h2>" in html and "Documentation mismatch" in html
@@ -246,3 +247,16 @@ def test_report_shows_host_crash_records(tmp_path):
     write_report(plan(), tmp_path)
     html = (tmp_path / "report.html").read_text(encoding="utf-8")
     assert "The host crashed during this run" in html and "Faulting module name: X.dll" in html
+
+
+def test_unin000_fails_on_program_leftovers_and_reports_settings_as_findings():
+    leftover = r"Left behind after the uninstall (user settings): HKCU\Software\SomeApp"
+    observations = happy()
+    observations[-1] = obs("UNIN-000", program_leftovers=0, settings_leftovers=1).model_copy(
+        update={"findings": [leftover]})
+    r = {x.test_id: x for x in evaluate(plan(), observations, set())}
+    assert r["UNIN-000"].status is Status.PASS and r["UNIN-000"].findings == [leftover]
+    observations[-1] = obs("UNIN-000", program_leftovers=2, settings_leftovers=0)
+    assert statuses(evaluate(plan(), observations, set()))["UNIN-000"] is Status.FAIL
+    observations[3] = obs("UNIN-001", uninstall_entry_exists=True)  # the uninstall didn't work
+    assert statuses(evaluate(plan(), observations, set()))["UNIN-000"] is Status.BLOCKED

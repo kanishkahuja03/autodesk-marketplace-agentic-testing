@@ -19,8 +19,9 @@ from mpagent.design.msi import MsiError
 from mpagent.design.static_read import StaticReadError, run_static_read
 from mpagent.execute.agent2 import Agent2Error, run_agent2
 from mpagent.execute.cleanup import cleanup
+from mpagent.execute.footprint import record_unin000
 from mpagent.execute.host import CRASH_EVENTS_FILE, kill_host, save_crash_events
-from mpagent.execute.observations import load_observations
+from mpagent.execute.observations import load_observations, save_observation
 from mpagent.execute.preflight import PreflightError, run_preflight
 from mpagent.execute.report import REPORT_FILE, summary_line, write_report
 from mpagent.hostnotes import host_process
@@ -150,6 +151,7 @@ def _execution_side(design: Design, settings: Settings) -> RunResults | None:
     finally:
         _log_missing_observations(design)
         _kill_host(design, started)
+        _check_leftovers(design)
         try:
             cleanup(design.run_dir, design.facts)
         except Exception as e:  # noqa: BLE001 - cleanup must never hide the real outcome
@@ -174,6 +176,22 @@ def _kill_host(design: Design, started: datetime) -> None:
         log.warning("HOST CRASH: %s", c.splitlines()[0] + " " + " ".join(c.splitlines()[1:3]))
     if crashes:
         log.warning("HOST: %d crash record(s) saved to %s", len(crashes), CRASH_EVENTS_FILE)
+
+
+def _check_leftovers(design: Design) -> None:
+    """UNIN-000: compare the footprint with the preflight's baseline, after the host was closed and before cleanup."""
+    hp = host_process(design.plan.app.host_id)
+    try:
+        obs = record_unin000(design.run_dir, design.facts.install_roots, hp.profile_ignore if hp else [])
+    except Exception as e:  # noqa: BLE001 - must never hide the real outcome
+        log.error("LEFTOVERS: check failed with %s: %s", type(e).__name__, e)
+        return
+    if obs is None:
+        return
+    save_observation(design.run_dir, obs)
+    log.info("  UNIN-000 observed: %s", ", ".join(f"{kv.key}={kv.value!r}" for kv in obs.observed))
+    for f in obs.findings:
+        log.warning("  %s", f)
 
 
 def _verdicts_and_report(design: Design, settings: Settings | None = None) -> RunResults | None:

@@ -55,8 +55,9 @@ These tests are **claims** from the app's documents (the test's `expected` value
    - Open things that only **reveal** more of the app's UI, for example: select a tab, expand a group, open a drop-down or a menu.
    - **Never trigger anything that acts:** something that runs a feature, exports, opens a website, a file dialog or a settings window, or changes or saves anything. If you can't tell whether something reveals or acts, leave it closed.
    - Close what you opened (e.g. `Esc`) before opening the next thing.
-3. **Take a `Screenshot` of every state you reach**: the entry point itself, and each revealed part. `record_observation` refuses these tests without a Screenshot since the previous record.
-4. Record each test with its `observe` key = your short description of what you saw, names exactly as shown (e.g. *"tab 'X' with groups 'A' (items: B, C) and 'D'"*), or `null` if you couldn't find it. In `notes`, say what you opened and how. This is your description, not the decision.
+3. **Make sure it can be seen.** The UI the claim is about may be **covered** (side panels, palettes, floating windows, other dialogs) or **cut off** (window too small, a ribbon or toolbar collapsed). Make it visible with **view-only changes, smallest first**: maximize the host window; expand or scroll; move, collapse or auto-hide the covering panel. Close a panel only if it isn't part of the test and can be reopened. Undo what you changed when you're done, and say in `notes` what you changed. If something stays covered, say what covers it.
+4. **Take a `Screenshot` of every state you reach**: the entry point itself, and each revealed part. Before recording, check that **your screenshots show every element the claim names**. `record_observation` refuses these tests without a Screenshot since the previous record.
+5. Record each test with its `observe` key = your short description of what you saw, names exactly as shown (e.g. *"tab 'X' with groups 'A' (items: B, C) and 'D'"*), or `null` if you couldn't find it. In `notes`, say what you opened and how. This is your description, not the decision.
 
 ## 7. Close the host (always, before UNIN)
 - `Process` with `mode="kill"` and `name` = the host's process name from "Host program". Do this even after an error or a stop.
