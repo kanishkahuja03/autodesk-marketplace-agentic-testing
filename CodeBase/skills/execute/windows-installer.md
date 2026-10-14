@@ -67,7 +67,7 @@ Get-AuthenticodeSignature -FilePath "<INSTALLER_PATH>" | Format-List Status, Sta
 ```
 Report `signature_status` (e.g. `Valid`, `NotSigned`, `HashMismatch`) and `signer_subject` (the `[Subject]` line of the certificate, e.g. `CN=…, O=…`).
 
-The guardrail rejects `;`, `{ }` (except GUIDs), `$( )`, `&` outside quotes, redirection and line breaks, and allows pipes only into `Select-Object`, `Format-List`, `Format-Table`, `Sort-Object`, `Measure-Object`, `Out-String` or `ConvertTo-Json`. Keep commands to one line. Names that contain `&` (e.g. `P&ID`) are fine inside quotes.
+The guardrail rejects `;`, `{ }` (except GUIDs), `$( )`, `&` outside quotes, redirection and line breaks, and allows pipes only into `Select-Object`, `Format-List`, `Format-Table`, `Sort-Object`, `Measure-Object`, `Out-String` or `ConvertTo-Json`. Keep commands to one line. Names that contain `&` are fine inside quotes.
 
 ## 7. UI rules (whenever a step needs the screen)
 - Start programs only with the App tool (`mode="launch_executable"`) and the exact path and arguments your input gives ("Host program"). **Never use Win+R / the Run dialog** or the Start menu search. No other program may be started.
@@ -76,4 +76,4 @@ The guardrail rejects `;`, `{ }` (except GUIDs), `$( )`, `&` outside quotes, red
 - If the same action failed twice, stop trying it: record what you saw (`executed: false`) and move on.
 
 ## 8. Resolving placeholders (during ENV)
-Fill every `${NAME}` from `required_env` with a real value found on this machine, using read-only checks only (registry values such as `AcadLocation` or `InstallLocation`, the folders given in your input, the installer facts). Return them in your final output `env`. If you can't resolve one, leave it out and say why in the notes of the test that needed it.
+Fill every `${NAME}` from `required_env` with a real value found on this machine, using read-only checks only (registry values such as `InstallLocation`, the "Host program" and "App under test" blocks, the folders given in your input, the installer facts). Return them in your final output `env`. If you can't resolve one, leave it out and say why in the notes of the test that needed it.

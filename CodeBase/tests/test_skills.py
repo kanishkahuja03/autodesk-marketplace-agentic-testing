@@ -60,10 +60,22 @@ def test_load_rules_are_in_the_skills():
     assert "`LOAD-002`" in design and "`U1`" in design and "seen_in_ui" not in design
     host = (SKILLS / "execute" / "host-interaction.md").read_text(encoding="utf-8")
     assert 'mode="launch_executable"' in host and 'mode="kill"' in host and "one-time" in host
-    assert "You decide what to do with each one" in host and "smallest lasting effect" in host
-    assert "Never choose \"Always" in host and "Document every dialog in the `notes`" in host
-    assert "timeout` at most 105" in host and "Then stop the LOAD tests" not in host  # no blanket stop rule
-    assert "only **reveal**" in host and "Never trigger anything that acts" in host  # generic exploration (L24)
+    assert "**You decide what to do**" in host and "smallest lasting effect" in host
+    assert "never choose \"Always" in host and "Document every dialog in the `notes`" in host
+    assert "`timeout` at most 105" in host
+    assert "**Reveal, never act.**" in host and "Make it visible." in host  # generic exploration (L24, D65)
+
+
+def test_skills_hold_no_host_or_app_specific_knowledge():
+    # generic-skills experiment (2026-10-14): only the host profile's front matter may name the host
+    words = re.compile(r"p&id|plant ?3d|autocad|ribbon(?!_tab)|hinweis|ctrl\+n|template|palette|kleen|revit",
+                       re.IGNORECASE)
+    for path in SKILLS.rglob("*.md"):
+        text = path.read_text(encoding="utf-8")
+        if path.parent.name == "hosts":
+            text = text.split("\n---\n", 1)[1]  # front matter is data for code; check only the prose
+            text = re.sub(r"^# Host: .*$|^An AutoCAD-based Autodesk product\..*$", "", text, flags=re.MULTILINE)
+        assert not words.search(text), f"{path.relative_to(SKILLS)}: {words.search(text).group()}"
 
 
 def test_uninstall_is_silent_and_files_are_read_only():

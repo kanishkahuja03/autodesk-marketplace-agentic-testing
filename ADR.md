@@ -11,7 +11,7 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an 
 ## ADR Index
 
 ### Documents
-- `./ARCHITECTURE.md` : V2.3 build plan. Decisions D1–D66, the one-F5 flow, agents, preflight, guardrails, cleanup, data contracts, skills, tech stack, code layout, build steps.
+- `./ARCHITECTURE.md` : V2.3 build plan. Decisions D1–D67, the one-F5 flow, agents, preflight, guardrails, cleanup, data contracts, skills, tech stack, code layout, build steps.
 - `./FUNCTIONAL_TESTS_PLAN.md` : LOAD test plan v3 (agreed in the grill-me review, 2026-10-13; branch `Dev-FunctionalTest`), with the reasoning behind D40–D52 and the Phase 2 (FUNC) outline.
 - `./AGENT_TOOLING_REVIEW.md` : Agent 1 components and Agent 2 Windows-MCP tools, one by one, with keep/drop recommendations for team review.
 - `./ARCHITECTURE_COMPARISON.md` : Our approach vs the `AppStore automation/` approach. Pros and cons, and what V2 took from each.
@@ -72,3 +72,4 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an 
 - **ADR-043 Generic exploration and findings:** Agent 2 opens only what reveals UI, never what acts, with screenshots and notes; the report shows each judgement and a Findings section. *(D62, D63; built 2026-10-14)*
 - **ADR-044 Nothing left behind:** a built-in UNIN-000 compares the machine before the install with the state after the uninstall (registry Software keys, user/data/program folders, install roots). Program leftovers FAIL; leftover user settings are PASS with a finding. Code reports, never deletes. *(D64)*
 - **ADR-045 Covered UI and the judge's client:** Agent 2 uncovers the claimed UI with view-only, undone changes; the judge treats covered elements as NEEDS_REVIEW ("hidden is not missing"). The judge uses its own OpenAI client and event loop per call. *(D65, D66)*
+- **ADR-046 Generic skills, host knowledge as data:** skills hold principles only; a host profile is front matter only (`host_process`, `releases`). Run 20261014-175347 with generic skills matched the case-tuned run (14 PASS, same findings, faster). Requires a strong model (gpt-5.5 class). *(D67)*

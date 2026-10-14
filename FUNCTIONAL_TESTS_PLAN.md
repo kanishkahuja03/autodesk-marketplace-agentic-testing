@@ -95,7 +95,7 @@ New self-check rules:
 - UNIN tests don't depend on LOAD (L8);
 - Agent 1 never writes LOAD-000 (code adds it).
 
-### 4.2 Host notes: front matter + standard sections
+### 4.2 Host notes: front matter + standard sections *(superseded 2026-10-14 by L29: front matter only)*
 Each `skills/hosts/<id>.md` gets YAML front matter that **code** reads (agents see it too):
 ```yaml
 host_process:
@@ -248,6 +248,7 @@ Run `20261014-124157` (11 PASS, 1 NEEDS_REVIEW) showed the limits of checking UI
 | L26 | Report | For every judged test: the claim with its quote, the verdict, the judge's reason, the findings and the screenshot it used. A **Findings** section lists all findings of the run (e.g. documentation mismatches). |
 | L27 | Nothing left behind *(added after run 20261014-153924)* | Built-in **UNIN-000**, decided by code: footprint before the install vs after the uninstall. Program leftovers → FAIL; user settings → PASS with a finding; never deleted (ARCHITECTURE.md D64). The run found the plug-in's leftovers `HKCU\Software\PidConnectorExport`, `%LocalAppData%\PidConnectorExport\license.dat` and a .NET `user.config` (language `en-US`, default `de-DE`). |
 | L28 | Covered UI *(added after run 20261014-153924)* | Agent 2 uncovers the claimed UI with view-only, undone changes and checks its screenshots show every named element; the judge: hidden is not missing (NEEDS_REVIEW). A clean host profile per run is deferred (D65). Also fixed: the judge's closed event loop (D66); re-judging that run's screenshots gave LOAD-001 and LOAD-002 PASS with documentation-mismatch findings. |
+| L29 | Generic skills *(experiment 2026-10-14)* | All host- and app-specific prose removed from the skills; the host profile is front matter only (`host_process`, `releases`). Run 20261014-175347 gave the same 14 PASS and findings as 20261014-162644, faster (ARCHITECTURE.md D67). §4.2's "standard sections" are superseded: hosts have no prose sections any more. |
 
 ### 9.3 Design
 - **Agent 1 (test-design skill):** the entry-point card stays (`kind`, `label`, `items`, `use_context`, `sources`), and its sources may now include `U1`. LOAD-001 claim: e.g. *"After installation the host shows a new tab called 'P&ID Exporter'"* (D2). LOAD-002 claim: e.g. *"The entry point contains two new buttons; one is 'Export', which exports the drawing to JSON"* (D2). Open questions: e.g. *"D2 says 'P&ID Exporter'; U1 contains 'P&ID Connector'"*.
