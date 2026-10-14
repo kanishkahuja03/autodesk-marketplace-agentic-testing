@@ -137,3 +137,37 @@ def test_trace_appends_json_lines(tmp_path):
     records = [json.loads(line) for line in (tmp_path / "trace.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [r["event"] for r in records] == ["llm_request", "mcp_call"]
     assert records[0]["agent"] == "test-designer"
+
+
+@needs_real_inputs
+def test_review_answer_no_stops_before_anything_is_installed(tmp_path, no_machine):
+    # seniors' request (FUNCTIONAL_TESTS_PLAN.md L19): review testcases.yaml, then y/n in the console
+    asked = []
+    code = pipeline.run(REAL_PLUGIN, tmp_path / "runs", agent1_ask=fake_ask(good_plan_data()),
+                        confirm=lambda q: asked.append(q) or False)
+    assert code == pipeline.EXIT_STOPPED and asked == [pipeline.REVIEW_QUESTION]
+    assert no_machine["order"] == []  # no preflight result used, Agent 2 never started
+    run_dir = _only_run_dir(tmp_path / "runs")
+    log_text = (run_dir / RUN_LOG).read_text(encoding="utf-8")
+    assert "INST-001" in log_text and "testcases.yaml" in log_text  # the plan is listed for the reviewer
+    assert "STOPPED: test plan not approved at the review" in _last_line(run_dir)
+
+
+@needs_real_inputs
+def test_review_answer_yes_continues(tmp_path, no_machine):
+    code = pipeline.run(REAL_PLUGIN, tmp_path / "runs", agent1_ask=fake_ask(good_plan_data()), confirm=lambda q: True)
+    assert code == pipeline.EXIT_COMPLETED and no_machine["order"][0] == "agent2"
+    assert "Test case review: approved" in (_only_run_dir(tmp_path / "runs") / RUN_LOG).read_text(encoding="utf-8")
+
+
+def test_console_confirm_asks_until_y_or_n(monkeypatch):
+    answers = iter(["", "maybe", "Y"])
+    monkeypatch.setattr("builtins.input", lambda q: next(answers))
+    assert pipeline.console_confirm("go? ") is True
+    monkeypatch.setattr("builtins.input", lambda q: "n")
+    assert pipeline.console_confirm("go? ") is False
+
+    def interrupted(q):
+        raise KeyboardInterrupt
+    monkeypatch.setattr("builtins.input", interrupted)
+    assert pipeline.console_confirm("go? ") is False

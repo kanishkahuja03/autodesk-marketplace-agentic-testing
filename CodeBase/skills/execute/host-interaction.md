@@ -1,6 +1,6 @@
 ---
 name: host-interaction
-description: How Agent 2 runs the LOAD tests - start the host application, answer a one-time load prompt for the app under test, open a new default document, take Snapshots for the code checks, and kill the host. Generic; host specifics come from the host notes. Used by Agent 2 only.
+description: How Agent 2 runs the LOAD tests - start the host application, decide how to handle dialogs (with evidence and notes), open a new default document, take Snapshots for the code checks, and kill the host. Generic; host specifics come from the host notes. Used by Agent 2 only.
 ---
 
 # Host interaction: LOAD tests (Agent 2)
@@ -26,16 +26,27 @@ A window such as "<host> Error Report", "… has stopped working", "Error Aborti
 Code collects the host's crash records from Windows by itself. You don't need to look for logs.
 
 ## 4. Dialogs while the host starts
-- **A dialog asking whether to load, trust or allow the app under test:** its text names the app, its publisher, its bundle or DLL name, or its install folder from "App under test". Click the **one-time "yes"**: "Load", "Load once", "Yes" or "Allow". Set `load_prompt_seen: true` and copy the dialog's title or text into `notes`.
-  - **Never** click "Always load", "Always trust" or "Always allow", and never tick "don't ask again" or anything that remembers the answer.
-  - Never change the host's options or security settings.
-- **Any other dialog** (licence, sign-in, update, error, a question you don't understand): don't answer it. Take a `Screenshot`, set `error_dialog_seen: true`, write its title and text into `notes`, and record LOAD-000 with **`executed: true`** (you carried out the steps; the dialog is the result). Then stop the LOAD tests (section 7).
-- Find buttons with `Snapshot` and click them by label, as in the UI rules.
+Hosts and apps often show dialogs at start. **You decide what to do with each one**, the way a careful human tester would: keep the test going, and change nothing permanently.
+
+**For every dialog:**
+1. `Snapshot` it and read its title, its text (in any language) and its buttons. Take a `Screenshot` before you click anything; it is the evidence.
+2. Work out what it is and what it wants from you. Use these as guidance, not as a fixed list:
+   - **A notice or information message** (it tells you something, e.g. that the app needs another product; usually only OK or Close): acknowledge it (OK / Close) and continue.
+   - **A question asking to load, trust or allow the app under test** (it names the app, publisher, bundle, DLL or install folder from "App under test"): give the **one-time** yes ("Load", "Load once", "Yes", "Allow"), and set `load_prompt_seen: true`.
+   - **An error or warning message while the host is still usable:** note it, dismiss it (OK / Close), set `error_dialog_seen: true`, and continue.
+   - **A crash report, or the host closing:** that's a crash (section 3).
+   - **Something that would change anything lasting** (sign in, licence or purchase, install or update, save, change settings) **or that you can't make sense of:** don't agree to it. Cancel or close it if that's clearly safe and continue; otherwise set `error_dialog_seen: true`, record LOAD-000 with `executed: true`, and stop the LOAD tests (section 7).
+3. Pick the button with the **smallest lasting effect**. Never choose "Always …", "Don't show / ask again", "Remember my choice" or anything else that remembers an answer or changes the host's options or security settings.
+4. If the same dialog comes back after you handled it twice, stop the LOAD tests (section 7).
+
+**Document every dialog in the `notes` of the LOAD test you are doing:** its title, its text (as shown, plus an English gist if it's in another language), what you judged it to be, the button you chose and why. For example: *"Dialog 'Hinweis' (German: 'This extension only works together with <companion product>'): an information notice from the app; clicked OK."* Your screenshots are attached to that test automatically.
+
+`error_dialog_seen` means an **error, warning or crash** was shown. A notice or a load prompt is not an error.
 
 ## 5. LOAD-000: a new default document
 1. Open the host's **default new document** as the host notes describe (e.g. a keyboard shortcut in the main window, the default template). Never open an existing file, a sample or a project.
 2. Wait a few seconds (`Wait`), then take a **`Snapshot`** of the host window. Code looks in this Snapshot.
-3. Record LOAD-000: `host_started` (the main window appeared), `document_opened` (a new document appeared), `error_dialog_seen` (`false` unless section 3 or 4 applied), `load_prompt_seen` (`true` / `false`).
+3. Record LOAD-000: `host_started` (the main window appeared), `document_opened` (a new document appeared), `error_dialog_seen` (an error, warning or crash was shown; sections 3 and 4), `load_prompt_seen` (`true` / `false`), and in `notes` every dialog you handled (section 4).
 
 ## 6. LOAD-001: the app's entry point
 1. Take another **`Snapshot`** of the host window, then a **`Screenshot`**. `record_observation` refuses a LOAD test without a Snapshot taken since the previous record.

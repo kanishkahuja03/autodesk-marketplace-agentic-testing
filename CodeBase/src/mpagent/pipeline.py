@@ -1,11 +1,13 @@
 """The full pipeline behind the single entry point (ARCHITECTURE.md D16).
 
-S0 intake -> S1 installer static read -> Agent 1 -> preflight -> Agent 2 -> kill host -> cleanup -> verdicts
--> report (the last four always run once Agent 2 has started). Every run gets its own run folder with run.log and a
+S0 intake -> S1 installer static read -> Agent 1 -> review of the test cases (y/n in the console) -> preflight
+-> Agent 2 -> kill host -> cleanup -> verdicts -> report (the last four always run once Agent 2 has started). Every run gets its own run folder with run.log and a
 final status line: COMPLETED (exit 0), STOPPED (exit 1) or CRASHED (exit 2).
 """
 
+import sys
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -54,14 +56,20 @@ class Design:
         return Path(self.manifest.input_dir) / self.manifest.installer.file
 
 
-def run(input_dir: Path, runs_dir: Path | None = None, agent1_ask: AskFn | None = None) -> int:
+# (question) -> True to continue; None = ask in the console when there is one (FUNCTIONAL_TESTS_PLAN.md L19)
+ConfirmFn = Callable[[str], bool]
+
+
+def run(input_dir: Path, runs_dir: Path | None = None, agent1_ask: AskFn | None = None,
+        confirm: ConfirmFn | None = None) -> int:
     """Run the whole pipeline for one input folder and return the process exit code.
-    `agent1_ask` replaces the real LLM call (unit tests only)."""
+    `agent1_ask` replaces the real LLM call and `confirm` the console question (unit tests only)."""
     start_logging()
     try:
         settings = load_settings()
         log.info("RUN: input %s", input_dir.resolve())
         design = _design_side(input_dir, runs_dir or settings.runs_dir, settings, agent1_ask)
+        _review(design, confirm)
         _preflight(design, settings)
         run_results = _execution_side(design, settings)
         if run_results is None:
@@ -80,6 +88,42 @@ def run(input_dir: Path, runs_dir: Path | None = None, agent1_ask: AskFn | None 
 
 def _no_run_folder_note() -> str:
     return "" if run_log_attached() else " (no run folder was created, so there is no run.log)"
+
+
+REVIEW_QUESTION = "Review the test cases above (testcases.yaml). Go ahead and run them on this machine? [y/n]: "
+
+
+def console_confirm(question: str) -> bool:
+    """Ask y/n in the console until the answer is y or n. Ctrl+C or end of input counts as n."""
+    while True:
+        try:
+            answer = input(question).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return False
+        if answer in ("y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+        print("Please answer y or n.")
+
+
+def _review(design: Design, confirm: ConfirmFn | None) -> None:
+    """Show the test cases and wait for the user's go-ahead before anything touches the machine (L19).
+    Without a console (e.g. unit tests), the run continues and the log says so."""
+    log.info("Test case review: please check the test plan before it runs")
+    log.info("  test cases: %s", design.run_dir / "testcases.yaml")
+    log.info("  summary:    %s", design.run_dir / "understanding.md")
+    for t in design.plan.testcases:
+        log.info("  %-9s %-4s %s %s", t.id, t.category.value, t.priority.value, t.title)
+    if confirm is None:
+        if not sys.stdin or not sys.stdin.isatty():
+            log.info("Test case review: no console to ask in; continuing")
+            return
+        confirm = console_confirm
+    if not confirm(REVIEW_QUESTION):
+        raise PipelineStopped("test plan not approved at the review — nothing was installed")
+    log.info("Test case review: approved")
 
 
 def _preflight(design: Design, settings: Settings) -> None:

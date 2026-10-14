@@ -60,9 +60,11 @@ Code gives you the exact executable path and arguments in "App under test". Item
 - Plant 3D may reopen the last project in the Project Manager palette. Leave it as it is: don't open, close or change projects. *(verify)*
 
 ### Dialogs at start
-These are examples of the generic dialog rule (host-interaction skill). The rule applies even if the wording differs.
-- A load or security prompt for a plug-in that's not in a trusted location (e.g. *"Security – Unsigned Executable File"*, or a question asking whether to load the plug-in). If it names the app under test, click the **one-time** answer ("Load", "Load once", "Yes"). Never click "Always load", and never change `SECURELOAD` or `TRUSTEDPATHS`. *(verify the exact wording)*
-- Licence or sign-in dialogs, "what's new" or update dialogs are **not** about the app. Stop LOAD, as the skill says.
+Examples only. You decide how to handle each dialog (host-interaction skill, section 4).
+- **Plug-in notices.** A plug-in may show its own message when Plant 3D starts. *Seen 2026-10-13/14:* a dialog titled "Hinweis" (German, "Notice") from a P&ID plug-in, saying it only works together with a companion product, with only OK. That's an information notice.
+- **Load or security prompts** for a plug-in outside a trusted location (e.g. *"Security – Unsigned Executable File"*, or a question asking whether to load it). If it names the app under test, the one-time answer ("Load", "Load once", "Yes") fits. Never "Always load", and never change `SECURELOAD` or `TRUSTEDPATHS`. *(not seen yet)*
+- **Licence, sign-in, "what's new" or update dialogs** belong to Autodesk, not to the app. Don't agree to anything there.
+- After start, Plant 3D briefly shows `Drawing1.dwg` and then switches to its **Start** page. *Seen 2026-10-14.* That's not a dialog: open a new drawing (below).
 
 ### Default new document
 - Press **Ctrl+N** in the main window (the `Shortcut` tool). If a "Select template" dialog opens, keep the default template and click **Open**. *(verify)*

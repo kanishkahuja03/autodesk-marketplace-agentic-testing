@@ -11,7 +11,7 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an 
 ## ADR Index
 
 ### Documents
-- `./ARCHITECTURE.md` : V2.3 build plan. Decisions D1–D55, the one-F5 flow, agents, preflight, guardrails, cleanup, data contracts, skills, tech stack, code layout, build steps.
+- `./ARCHITECTURE.md` : V2.3 build plan. Decisions D1–D57, the one-F5 flow, agents, preflight, guardrails, cleanup, data contracts, skills, tech stack, code layout, build steps.
 - `./FUNCTIONAL_TESTS_PLAN.md` : LOAD test plan v3 (agreed in the grill-me review, 2026-10-13; branch `Dev-FunctionalTest`), with the reasoning behind D40–D52 and the Phase 2 (FUNC) outline.
 - `./AGENT_TOOLING_REVIEW.md` : Agent 1 components and Agent 2 Windows-MCP tools, one by one, with keep/drop recommendations for team review.
 - `./ARCHITECTURE_COMPARISON.md` : Our approach vs the `AppStore automation/` approach. Pros and cons, and what V2 took from each.
@@ -25,7 +25,7 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an 
 - **ADR-004 Agent framework:** OpenAI Agents SDK (Python). It supplies the agent loop, MCP client, structured output and tool filtering. *(D3)*
 - **ADR-005 Machine interaction:** Agent 2 drives the machine only through Windows-MCP (UI, Registry, FileSystem, Process, PowerShell), using a 13-tool allow-list enforced in two places. There is no action catalogue of our own. The one local tool is `record_observation` (ADR-025), which only writes a file. *(D5, D6)*
 - **ADR-006 Verdict by code:** Agent 2 reports raw observations only. Code compares them with each test's `expected` checks and sets PASS / FAIL / NEEDS_REVIEW / BLOCKED / ERROR. The LLM never sets a status. *(D7)*
-- **ADR-007 Demo scope:** ENV, INST, LOAD and UNIN tests (LOAD added 2026-10-13, ADR-033). Fully automatic, no human review gate. Demo app: P&ID Connector Exporter. *(D8, D9, D14)*
+- **ADR-007 Demo scope:** ENV, INST, LOAD and UNIN tests (LOAD added 2026-10-13, ADR-033). Fully automatic except one y/n review of the test cases (ADR-040). Demo app: P&ID Connector Exporter. *(D8, D9, D14)*
 - **ADR-008 Reuse existing intake:** keep the existing `intake.py` and installer static read (`static_read.py`, `msi.py`). *(D10)*
 - **ADR-009 Local tracing only:** OpenAI tracing is disabled. Every LLM turn and MCP call is logged to `trace.jsonl` in the run folder. *(D11)*
 - **ADR-010 Execution environment:** the POC runs on the dev machine, elevated. VM or Sandbox isolation is a later phase. *(D12)*
@@ -34,7 +34,7 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an 
 - **ADR-013 New decisions win:** where `ARCHITECTURE.md` V2 conflicts with older docs or with code already in `CodeBase/`, V2 wins.
 
 ### Decisions from the grill-me session (2026-10-12)
-- **ADR-014 One Run button:** F5 in Visual Studio always runs the full pipeline into a new run folder. There are no sub-commands and no stop switches. The only launch argument is the input folder `inputs/<app>`. *(D16, D17)*
+- **ADR-014 One Run button:** F5 in Visual Studio always runs the full pipeline into a new run folder. There are no sub-commands and no stop switches; the only question asked is the test-case review (ADR-040). The only launch argument is the input folder `inputs/<app>`. *(D16, D17)*
 - **ADR-015 Fail-safe stop before execution:** if Agent 1's plan still fails the self-check after 2 retries, the pipeline stops before Agent 2. It's reported in the logs only. *(D18)*
 - **ADR-016 Logging:** each run writes `run.log` (readable, also on the console, final `COMPLETED`/`STOPPED` line) and `trace.jsonl` (all LLM and MCP calls). `report.html` is written only if Agent 2 ran. *(D19)*
 - **ADR-017 Code preflight before Agent 2:** the process must be elevated, Windows-MCP must expose exactly the 13 allowed tools, and ENV-000 must show the plug-in isn't installed yet. Any failure → STOPPED. It runs after Agent 1, so Agent 1 stays blind. *(D20)*
@@ -63,3 +63,7 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an 
 - **ADR-036 Host safety:** one Agent 2 session; App starts only the host with its exact args; no uninstall while the host runs; host closed by Process kill; preflight stops if the host already runs; `finally` kills the host before cleanup. *(D47–D52)*
 - **ADR-037 Order and crashes enforced by code:** no host start before the installer ran; no executed install test without it; a host crash gets one restart, and code saves Windows' crash records for the host to the evidence and the report. *(D53, D54)*
 - **ADR-038 Normal environment for Windows-MCP:** the server (and every program it starts) gets the normal Windows environment without secrets, not the MCP SDK's 12-variable default; that default made Plant 3D crash at every pipeline start. *(D55)*
+
+### Decisions from 2026-10-14
+- **ADR-039 Dialogs decided by Agent 2:** Agent 2 judges each dialog (notice, load prompt, error, crash, lasting change, unclear) and picks the button with the smallest lasting effect; never "Always …" or settings changes. Evidence = the attached screenshots; the record = the LOAD test's `notes`. No extra guardrail or file. Replaces the blanket "stop at any other dialog" rule. *(D56, replaces D49)*
+- **ADR-040 Test-case review in the console:** after Agent 1, the console lists the test cases and asks y/n before anything touches the machine; `n` stops the run. No console → the run continues. Requested by the seniors for the recorded demo. *(D57, updates D9, D16)*

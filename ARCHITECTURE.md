@@ -1,6 +1,6 @@
 # Architecture V2: Generic Plug-in / App Validation Agents
 
-> **Status:** v2.2, 2026-10-13. This is the build plan for the product. v2.1 added the grill-me decisions D16–D35 (one F5 run, preflight, cleanup, logging, guardrails, `record_observation`). **v2.2** records what the live runs of 2026-10-12/13 taught (D24, D26, D27, D30, D32, D33 updated; D36–D39 new): silent uninstall instead of the UI, read-only FileSystem, per-run guardrail rules, cleaned and capped tool results, app facts in Agent 2's input. First clean run: `20261013-152426` (3 PASS). **v2.3** (2026-10-13, branch `Dev-FunctionalTest`) adds the **LOAD** test level from the grill-me review of [`FUNCTIONAL_TESTS_PLAN.md`](FUNCTIONAL_TESTS_PLAN.md) (D8, D29, D35 updated; D40–D55 new).
+> **Status:** v2.2, 2026-10-13. This is the build plan for the product. v2.1 added the grill-me decisions D16–D35 (one F5 run, preflight, cleanup, logging, guardrails, `record_observation`). **v2.2** records what the live runs of 2026-10-12/13 taught (D24, D26, D27, D30, D32, D33 updated; D36–D39 new): silent uninstall instead of the UI, read-only FileSystem, per-run guardrail rules, cleaned and capped tool results, app facts in Agent 2's input. First clean run: `20261013-152426` (3 PASS). **v2.3** (2026-10-13, branch `Dev-FunctionalTest`) adds the **LOAD** test level from the grill-me review of [`FUNCTIONAL_TESTS_PLAN.md`](FUNCTIONAL_TESTS_PLAN.md) (D8, D9, D16, D29, D35 updated; D40–D57 new).
 > **Supersedes:** [`ARCHITECTURE_old1.md`](ARCHITECTURE_old1.md) (v0.3). Where they disagree, **this document wins**, including over what is already in `CodeBase/`.
 > **Inputs to this version:** [`ARCHITECTURE_COMPARISON.md`](ARCHITECTURE_COMPARISON.md) (ours vs `AppStore automation/`), [`AGENT_TOOLING_REVIEW.md`](AGENT_TOOLING_REVIEW.md) (tool lists, one by one), [`DESKTOP_UI_AUTOMATION_RESEARCH.md`](DESKTOP_UI_AUTOMATION_RESEARCH.md). Decision index: [`ADR.md`](ADR.md).
 
@@ -34,7 +34,7 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 | D6 | UI interaction | **[Windows-MCP](https://github.com/CursorTouch/Windows-MCP)** (reads the accessibility tree, then clicks, types and takes screenshots) |
 | D7 | Verdict | **Code** compares observed values with expected ones. The LLM never sets PASS/FAIL. For LOAD, code reads the Snapshot UI tree itself (D44). |
 | D8 | Demo test levels | **ENV, INST, LOAD, UNIN** (LOAD added in v2.3, D40–D52; FUNC later) |
-| D9 | Human review gate | **None.** Fully automatic. |
+| D9 | Human review gate | **One y/n review of the test cases** in the console after Agent 1 (D57, requested by the seniors 2026-10-14); otherwise fully automatic. |
 | D10 | Doc extraction | **Keep the existing `intake.py`** (pypdf, python-docx, bs4) |
 | D11 | Tracing | **Local only.** OpenAI tracing disabled. See D19 for the log files. |
 | D12 | Machine | Dev machine, **run as administrator**. Risk accepted. VM later. |
@@ -46,7 +46,7 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 
 | # | Topic | Decision |
 |---|---|---|
-| D16 | One Run button | **F5 always runs the full pipeline** (S0 → S1 → Agent 1 → preflight → Agent 2 → verdicts → report → cleanup) into a **new** run folder. There are no sub-commands and no stop switches. |
+| D16 | One Run button | **F5 always runs the full pipeline** (S0 → S1 → Agent 1 → test-case review → preflight → Agent 2 → verdicts → report → cleanup) into a **new** run folder. There are no sub-commands and no stop switches; the only question asked is the test-case review (D57). |
 | D17 | Input selection | F5 tests **one input folder**, given as the only launch argument in `mpagent.pyproj` (`inputs/<app>`). To switch apps, change that value. |
 | D18 | Agent 1 self-check failure | After 2 retries, the pipeline **stops before Agent 2**. The machine is untouched. It's reported **only in the logs**, with no separate report. |
 | D19 | Logging | Per run: **`run.log`** (readable step status, also shown in the VS console, final `COMPLETED`/`STOPPED` line) and **`trace.jsonl`** (every LLM request/response and MCP call). `report.html` is written **only if Agent 2 ran**. |
@@ -76,7 +76,7 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 | D38 | App facts for Agent 2 | Code adds an **"App under test"** block to Agent 2's input: DisplayName, Publisher, Version, ProductCode, the three Uninstall registry paths with the ProductCode, the install roots expanded to real paths, and the machine's real folders (`%APPDATA%`, `%LOCALAPPDATA%`, `%USERPROFILE%`, `%ProgramFiles%`, …). Execution side only, so Agent 1 stays blind. *(Run 20261013-132121 guessed `C:\Users\Admin`, `C:\Users\User`.)* |
 | D39 | Stopping a run | **Ctrl+C in the console** interrupts Agent 2, and the `finally` steps (cleanup, verdicts, report) still run; the log then ends without a COMPLETED/STOPPED line. The VS **Stop** button or closing the console kills the process, so cleanup can't run; the next run then stops at ENV-000 and prints the exact `msiexec /x {ProductCode} /qn` command to remove the leftover. |
 
-### 2.4 LOAD tests (D40–D55, grill-me review of FUNCTIONAL_TESTS_PLAN.md, 2026-10-13)
+### 2.4 LOAD tests (D40–D57, grill-me review of FUNCTIONAL_TESTS_PLAN.md, 2026-10-13)
 
 LOAD checks that the plug-in is **loaded by its host**: the host starts, opens a new document, and the app's entry point is visible. Details and reasoning: [`FUNCTIONAL_TESTS_PLAN.md`](FUNCTIONAL_TESTS_PLAN.md) §3 (L1–L18).
 
@@ -91,13 +91,15 @@ LOAD checks that the plug-in is **loaded by its host**: the host starts, opens a
 | D46 | Raw Snapshot evidence | The recorder saves every Snapshot's **full** text as `evidence/<n>_Snapshot_ui.txt` (decoded if Windows-MCP returns a JSON list) and attaches it like screenshots. `record_observation` refuses an executed UI-checked test without a Snapshot since the previous record. |
 | D47 | One session | Agent 2 stays **one session** (D5). A guardrail **rejects an uninstall `msiexec /x` while a host process runs**, so locked plug-in files can't spoil UNIN. UNIN never depends on LOAD. |
 | D48 | Starting programs | The App tool may run only **`launch_executable` with the host's exact path and args** (path resolved by code, given in "Host program"); `launch` by name is rejected; `switch`/`resize` allowed. Without a host, App starts nothing. |
-| D49 | Dialogs | Generic rule: a prompt asking to load/trust/allow **the app under test** gets the **one-time yes**; never "Always …", never a settings change. Any other dialog stops LOAD. Accepted prompts are reported as `load_prompt_seen`. |
+| D49 | Dialogs | **Replaced by D56** (2026-10-14). Was: a load/trust prompt for the app gets the one-time yes, and any other dialog stops LOAD; that blanket stop failed LOAD on a harmless plug-in notice (run 20261014-111858). |
 | D50 | Closing and waiting | Agent 2 closes the host with **`Process kill` by name** (host processes allowed; kill by pid rejected); no saving, no graceful close. `Wait`/`WaitFor` are capped at tool timeout − 15 s (105 s). |
 | D51 | Host already running | **Preflight stops** if a host process runs, so no user session is touched. `finally` kills the host **before cleanup**: kill host → cleanup → verdicts → report. |
 | D52 | Host executable missing | If the registry lookup finds no executable, Agent 2 starts nothing and records LOAD as not executed. |
 | D53 | Order enforced by code | The App tool can't start the host before `msiexec /i` has run in this run, and `record_observation` refuses an executed test observing `install_exit_code` when the installer never ran. *(Run 20261013-175002: Agent 2 skipped the install, started the host and recorded INST-001 as executed with an invented cause.)* |
 | D54 | Host crashes | Agent 2 kills a host that crashed at start and starts it **once more**; a second crash is LOAD-000 `executed: true`, `error_dialog_seen: true` (FAIL). In `finally`, code saves Windows' crash records for the host's processes (Application Error, WER, .NET Runtime) to `evidence/host_crash_events.txt`, logs them, and the report shows them. *(Run 20261013-175002: Plant 3D crashed in `ODISSDK.dll` at start; the cause turned out to be D55.)* |
 | D55 | Windows-MCP environment | The MCP SDK starts a stdio server with only 12 environment variables, and every program Windows-MCP starts inherits them. Without `ProgramData`, `ProgramFiles`, `CommonProgramFiles`, … Plant 3D crashed in `ODISSDK.dll` on every pipeline start (runs 20261013-175002, -184220; reproduced with the SDK's environment). Code now passes the server **this process's normal environment, minus anything named like a secret** (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `AUTH`, `COOKIE`), so API keys never reach Windows-MCP or the host (`execute/windows_mcp.py: server_env`). |
+| D56 | Dialogs: Agent 2 decides | **Agent 2 decides how to handle each dialog**, as a careful tester would: read it (Snapshot), take a Screenshot, judge what it is (notice, load/trust prompt for the app, error while the host still works, crash, something with a lasting effect or unclear) and pick the button with the **smallest lasting effect**, so the test can go on. The skill gives principles and examples, not a fixed list; never "Always …", "Don't show again" or a settings change; something with a lasting effect or unclear is not agreed to; the same dialog twice → stop LOAD. **Evidence and record use the existing workflow:** the screenshots (attached automatically) and the LOAD test's `notes` (title, text with an English gist, judgement, button, reason). No extra guardrail or dialog file. `error_dialog_seen` = an error, warning or crash was shown; a notice or load prompt is not an error. *(Run 20261014-111858: the plug-in's German notice "Hinweis" with only OK stopped LOAD under D49.)* |
+| D57 | Test-case review | After Agent 1 writes `testcases.yaml` and `understanding.md`, the console lists every test (ID, category, priority, title) with both file paths and asks **"Go ahead and run them on this machine? [y/n]"**. `y` continues to the preflight; `n` (or Ctrl+C / end of input) ends the run as `STOPPED: test plan not approved at the review`, before anything is installed. Without a console (unit tests, redirected input) the run continues and the log says so. *(Requested by the seniors, 2026-10-14, so a recorded demo shows the plan being checked before it runs.)* |
 
 **Agent 2 resolves placeholders** (`${PLUGIN_DIR}` etc.) during its ENV tests and returns them in its final output.
 
@@ -119,6 +121,9 @@ LOAD checks that the plug-in is **loaded by its host**: the host starts, opens a
    └────────────────────────────────────────────────────┘
         │ testcases.yaml, understanding.md
  EXECUTION SIDE
+        ▼
+   REVIEW (console): test cases listed → "Go ahead? [y/n]"  └─ n → STOPPED (exit 1)
+        │
         ▼
    PREFLIGHT (code): elevated? · Windows-MCP = 13 tools? · ENV-000 plug-in not installed? · host not running?
         │                                                   └─ any fail → STOPPED (exit 1)
@@ -335,7 +340,7 @@ env: [{ key: HOST_INSTALL_DIR, value: 'C:\Program Files\Autodesk\AutoCAD 2027' }
 | `skills/hosts/none.md` | Agents 1 + 2 | Standalone Windows app: Program Files, Start menu, Programs & Features only |
 | `skills/execute/windows-installer.md` | Agent 2 | Allowed PowerShell commands (D32); read-only file rules and the 50 KB / 20,000-character limits (D33, D37); silent install and **silent uninstall** with logs, exit codes read from the logs (D26, D27); the three Uninstall registry paths; signature check; generic UI rules (full paths only, no Win+R, no guessed coordinates, never touch the console) |
 | `skills/execute/evidence.md` | Agent 2 | Call `record_observation` after every test; raw values only; reference saved screenshots and logs; untrusted-text rule; read-only rule; run every test |
-| `skills/execute/host-interaction.md` | Agent 2 | Generic LOAD steps: start the host only after a successful install, exact launch, the one-time load-prompt rule, default new document, Snapshot before each record, kill the host before UNIN (D47–D50) |
+| `skills/execute/host-interaction.md` | Agent 2 | Generic LOAD steps: start the host only after a successful install, exact launch, judging dialogs by principles with screenshots and notes (D56), default new document, Snapshot before each record, kill the host before UNIN (D47–D50) |
 
 A new host means **one new Markdown file**, with no code change.
 
