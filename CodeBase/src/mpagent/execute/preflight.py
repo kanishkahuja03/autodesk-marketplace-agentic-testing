@@ -3,7 +3,7 @@
 1. The process is elevated (installers and the UI uninstall need admin; UAC can't be automated).
 2. Windows-MCP starts and exposes exactly the 13 allowed tools.
 3. ENV-000: the app is not installed yet (Uninstall entry by ProductCode, or DisplayName as a fallback).
-4. The host isn't running (FUNCTIONAL_TESTS_PLAN.md L12): a run would act in, and at the end kill, the
+4. The host isn't running (LOAD_TESTS_PLAN.md L12): a run would act in, and at the end kill, the
    user's own session. Only for hosts whose notes have host_process.
 Any failure raises PreflightError; the pipeline then stops and Agent 2 doesn't start.
 """

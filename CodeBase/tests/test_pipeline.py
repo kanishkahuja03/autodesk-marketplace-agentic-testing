@@ -74,7 +74,7 @@ def test_real_plugin_full_run_completes(tmp_path, no_machine):
     run_dir = _only_run_dir(tmp_path / "runs")
     for name in ("installer_facts.json", "testcases.yaml", "testcases.json", "understanding.md", "trace.jsonl"):
         assert (run_dir / name).exists(), name
-    # the host is killed before cleanup, so the uninstall never runs under it (FUNCTIONAL_TESTS_PLAN.md L12)
+    # the host is killed before cleanup, so the uninstall never runs under it (LOAD_TESTS_PLAN.md L12)
     assert no_machine["order"] == ["agent2", "kill_host", "cleanup"]
     assert (run_dir / "results.json").exists() and (run_dir / "report.html").exists()
     last = _last_line(run_dir)
@@ -141,7 +141,7 @@ def test_trace_appends_json_lines(tmp_path):
 
 @needs_real_inputs
 def test_review_answer_no_stops_before_anything_is_installed(tmp_path, no_machine):
-    # seniors' request (FUNCTIONAL_TESTS_PLAN.md L19): review testcases.yaml, then y/n in the console
+    # seniors' request (LOAD_TESTS_PLAN.md L19): review testcases.yaml, then y/n in the console
     asked = []
     code = pipeline.run(REAL_PLUGIN, tmp_path / "runs", agent1_ask=fake_ask(good_plan_data()),
                         confirm=lambda q: asked.append(q) or False)

@@ -1,4 +1,4 @@
-"""Tests for finding, checking and killing the host (FUNCTIONAL_TESTS_PLAN.md L9, L12, L13). Run with: uv run pytest"""
+"""Tests for finding, checking and killing the host (LOAD_TESTS_PLAN.md L9, L12, L13). Run with: uv run pytest"""
 
 import subprocess
 from datetime import UTC, datetime

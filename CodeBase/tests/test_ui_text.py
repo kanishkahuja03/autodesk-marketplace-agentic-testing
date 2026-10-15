@@ -1,4 +1,4 @@
-"""Tests for the app's UI text from its binaries (FUNCTIONAL_TESTS_PLAN.md L22, source U1). Run with: uv run pytest"""
+"""Tests for the app's UI text from its binaries (LOAD_TESTS_PLAN.md L22, source U1). Run with: uv run pytest"""
 
 from pathlib import Path
 

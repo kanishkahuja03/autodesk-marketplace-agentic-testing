@@ -8,7 +8,7 @@ Precedence for each test:
   NEEDS_REVIEW  the judge couldn't decide a UI claim from the evidence
   PASS          every expected check holds
 Values are compared as text after light normalising, so 0 == "0" and True == "true".
-`window_in_ui` (FUNCTIONAL_TESTS_PLAN.md L11, L17) is decided from the raw Snapshot UI-tree files attached to
+`window_in_ui` (LOAD_TESTS_PLAN.md L11, L17) is decided from the raw Snapshot UI-tree files attached to
 the observation. `judged` UI claims (L20-L25) are decided by the LLM judge from the attached screenshots, inside
 guards kept by code. Agent 2's own value is kept only for the report.
 """
@@ -172,7 +172,7 @@ def _evaluate_test(t: TestCase, obs: Observation | None, resolved_env: set[str] 
 
 def _judged_check(t: TestCase, e: Expectation, obs: Observation, ui: UiContext,
                   reported: Scalar) -> tuple[CheckResult, str | None, Judgement | None]:
-    """A UI claim decided by the judge, inside code guards (FUNCTIONAL_TESTS_PLAN.md L25): never without
+    """A UI claim decided by the judge, inside code guards (LOAD_TESTS_PLAN.md L25): never without
     screenshots, never on a screenshot that isn't attached to this test, a failed call is an ERROR."""
 
     def make(observed: Scalar, ok: bool = False, review: bool = False) -> CheckResult:

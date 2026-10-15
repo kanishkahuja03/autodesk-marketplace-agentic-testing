@@ -57,7 +57,7 @@ class Design:
         return Path(self.manifest.input_dir) / self.manifest.installer.file
 
 
-# (question) -> True to continue; None = ask in the console when there is one (FUNCTIONAL_TESTS_PLAN.md L19)
+# (question) -> True to continue; None = ask in the console when there is one (LOAD_TESTS_PLAN.md L19)
 ConfirmFn = Callable[[str], bool]
 
 
@@ -139,7 +139,7 @@ def _preflight(design: Design, settings: Settings) -> None:
 
 def _execution_side(design: Design, settings: Settings) -> RunResults | None:
     """Agent 2, then (in `finally`, whatever happened) kill the host, cleanup (D28) and verdicts + report (D19, D29).
-    The host is killed before cleanup, so an uninstall never runs under it (FUNCTIONAL_TESTS_PLAN.md L12)."""
+    The host is killed before cleanup, so an uninstall never runs under it (LOAD_TESTS_PLAN.md L12)."""
     log.info("Agent 2 test execution: start")
     started = datetime.now().astimezone()
     run_results: RunResults | None = None

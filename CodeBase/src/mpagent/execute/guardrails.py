@@ -2,7 +2,7 @@
 
 check_tool_call() is a pure function: it returns None to allow the call, or the reason it is rejected.
 CallPolicy adds the per-run rules (install only once, no endless repeats of the same call, no uninstall
-while the host runs). Host rules (FUNCTIONAL_TESTS_PLAN.md L7, L9, L13, L14): the App tool may start only the
+while the host runs). Host rules (LOAD_TESTS_PLAN.md L7, L9, L13, L14): the App tool may start only the
 host executable with its exact arguments, Process kill is allowed for the host's processes, waits are capped.
 tool_guardrail() wraps both for the Agents SDK; a rejected call is not executed and the model gets the reason.
 """

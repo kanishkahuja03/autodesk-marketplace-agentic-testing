@@ -75,7 +75,7 @@ def windows_mcp_server(settings: Settings, recorder: "CallRecorder | None" = Non
 
 class CallRecorder:
     """Traces MCP calls and saves screenshots to evidence/, plus the full raw text of every Snapshot
-    (evidence/<n>_Snapshot_ui.txt) for the UI checks (FUNCTIONAL_TESTS_PLAN.md L17). Files saved since the
+    (evidence/<n>_Snapshot_ui.txt) for the UI checks (LOAD_TESTS_PLAN.md L17). Files saved since the
     last record_observation call are handed over with take_pending() (ARCHITECTURE.md D31)."""
 
     def __init__(self, run_dir: Path, trace):

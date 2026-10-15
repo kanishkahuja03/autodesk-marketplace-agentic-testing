@@ -13,7 +13,7 @@ SRC = Path(__file__).parent.parent / "src" / "mpagent"
 EXPECTED = ["test-design/SKILL.md", "hosts/autocad-plant3d.md", "hosts/none.md",
             "execute/windows-installer.md", "execute/evidence.md", "execute/host-interaction.md",
             "execute/judge.md"]
-# Generic parts must not name a product (FUNCTIONAL_TESTS_PLAN.md, rule kept from D1)
+# Generic parts must not name a product (LOAD_TESTS_PLAN.md, rule kept from D1)
 PRODUCT_NAMES = re.compile(r"plant ?3d|autocad|acad|p&id", re.IGNORECASE)
 GENERIC_FILES = [SKILLS / "execute" / "host-interaction.md", SRC / "hostnotes.py", SRC / "execute" / "host.py",
                  SRC / "execute" / "ui_tree.py", SRC / "execute" / "verdict.py",
@@ -35,7 +35,7 @@ def test_host_note_name_matches_file_name():
 
 
 def test_host_process_front_matter():
-    # code reads it (FUNCTIONAL_TESTS_PLAN.md L9); 'none' has no host to start
+    # code reads it (LOAD_TESTS_PLAN.md L9); 'none' has no host to start
     hp = host_process("autocad-plant3d", SKILLS / "hosts")
     assert isinstance(hp, HostProcess) and hp.processes and hp.args
     for pattern in (hp.locate.match, hp.main_window, hp.new_document):

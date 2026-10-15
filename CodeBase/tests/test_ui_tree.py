@@ -1,4 +1,4 @@
-"""Tests for the Snapshot UI-tree reader (FUNCTIONAL_TESTS_PLAN.md L4, L11, L17). Run with: uv run pytest"""
+"""Tests for the Snapshot UI-tree reader (LOAD_TESTS_PLAN.md L4, L11, L17). Run with: uv run pytest"""
 
 import json
 from pathlib import Path

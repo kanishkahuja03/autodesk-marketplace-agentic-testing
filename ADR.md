@@ -12,7 +12,8 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an 
 
 ### Documents
 - `./ARCHITECTURE.md` : V2.3 build plan. Decisions D1–D67, the one-F5 flow, agents, preflight, guardrails, cleanup, data contracts, skills, tech stack, code layout, build steps.
-- `./FUNCTIONAL_TESTS_PLAN.md` : LOAD test plan v3 (agreed in the grill-me review, 2026-10-13; branch `Dev-FunctionalTest`), with the reasoning behind D40–D52 and the Phase 2 (FUNC) outline.
+- `./FUNC_TESTS_PLAN.md` : draft plan for FUNC tests (running documented features), decisions F1–F16; not yet agreed.
+- `./LOAD_TESTS_PLAN.md` : the LOAD test plan (formerly FUNCTIONAL_TESTS_PLAN.md): decisions L1–L29 behind D40–D67, the current design, and the live runs; built and verified 2026-10-14 (14 PASS with generic skills).
 - `./AGENT_TOOLING_REVIEW.md` : Agent 1 components and Agent 2 Windows-MCP tools, one by one, with keep/drop recommendations for team review.
 - `./ARCHITECTURE_COMPARISON.md` : Our approach vs the `AppStore automation/` approach. Pros and cons, and what V2 took from each.
 - `./DESKTOP_UI_AUTOMATION_RESEARCH.md` : Research on desktop UI automation MCP servers, models and libraries.

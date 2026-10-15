@@ -2,7 +2,7 @@
 
   D1..  documents from the input folder (S0)
   I1..  documents embedded in the installer (S1)
-  U1    UI text found in the app's binaries (hints, FUNCTIONAL_TESTS_PLAN.md L22)
+  U1    UI text found in the app's binaries (hints, LOAD_TESTS_PLAN.md L22)
   F1    installer_facts.json rendered as one `key = value` per line (ARCHITECTURE.md §4)
 
 Agent 1 cites these IDs; the self-check verifies each quote against the same text.

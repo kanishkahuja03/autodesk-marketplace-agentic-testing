@@ -1,4 +1,4 @@
-"""The host application on this machine (FUNCTIONAL_TESTS_PLAN.md L9, L12, L13): find its executable,
+"""The host application on this machine (LOAD_TESTS_PLAN.md L9, L12, L13): find its executable,
 see whether it runs, and kill it. Driven only by the host notes' `host_process` front matter.
 
 Read-only except kill_host(), which code calls in `finally` (before cleanup) so an uninstall never runs

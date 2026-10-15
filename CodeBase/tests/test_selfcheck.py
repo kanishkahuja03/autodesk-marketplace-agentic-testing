@@ -113,7 +113,7 @@ def test_env_tests_may_not_observe_app_install_keys():
     assert errors_for(changed(lambda d: d["testcases"].append(env))) == []
 
 
-# ---------------------------------------------------------------- LOAD rules (FUNCTIONAL_TESTS_PLAN.md §4.1)
+# ---------------------------------------------------------------- LOAD rules (LOAD_TESTS_PLAN.md §4.1)
 LOAD_SOURCES = SOURCES + [Source("D2", "UserGuide.txt", "After installation, " + TAB_QUOTE + ", which contains two "
                                                         "new buttons.\nThe “Export” button is used to export.")]
 

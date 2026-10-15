@@ -57,7 +57,7 @@ TAB_QUOTE = "you will receive a new tab called “P&ID Exporter”"  # real User
 
 
 def load_plan_data() -> dict:
-    """good_plan_data() plus the entry-point card and LOAD-001 (FUNCTIONAL_TESTS_PLAN.md §4.1)."""
+    """good_plan_data() plus the entry-point card and LOAD-001 (LOAD_TESTS_PLAN.md §4.1)."""
     data = good_plan_data()
     data["summary"]["entry_point"] = {
         "kind": "ribbon_tab", "label": "P&ID Exporter", "items": [], "use_context": None,

@@ -35,7 +35,7 @@ from mpagent.runlog import Trace, log
 
 SKILLS_DIR = PROJECT_ROOT / "skills"
 RESULT_FILE = "agent2_result.json"
-WAIT_MARGIN_S = 15  # a Wait/WaitFor must end before the MCP call itself times out (FUNCTIONAL_TESTS_PLAN.md L14)
+WAIT_MARGIN_S = 15  # a Wait/WaitFor must end before the MCP call itself times out (LOAD_TESTS_PLAN.md L14)
 
 
 class Agent2Error(Exception):
@@ -58,7 +58,7 @@ UNINSTALL_ROOTS = (r"HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
 
 
 def host_facts(host: HostLaunch) -> str:
-    """The only program Agent 2 may start, resolved by code (FUNCTIONAL_TESTS_PLAN.md L9)."""
+    """The only program Agent 2 may start, resolved by code (LOAD_TESTS_PLAN.md L9)."""
     if not host.executable:
         return ("Host program: NOT FOUND on this machine (the host notes' registry lookup found no executable). "
                 "Don't start anything: record every LOAD test with executed: false and the note "
@@ -143,11 +143,11 @@ class ObservationRecorder:
             return (f"Not recorded: {test_id} observes install_exit_code, but the installer hasn't run in this run. "
                     "Run the silent install first (windows-installer skill), then record the exit code from the log.")
         if executed and test_id in self.tree_tests and not self.recorder.has_pending_snapshot():
-            # the UI tree decides this test (FUNCTIONAL_TESTS_PLAN.md L5); it needs a Snapshot taken for it
+            # the UI tree decides this test (LOAD_TESTS_PLAN.md L5); it needs a Snapshot taken for it
             return (f"Not recorded: {test_id} is checked from the UI tree, but you took no Snapshot since the "
                     "previous record_observation. Take a Snapshot of the host window first, then record again.")
         if executed and test_id in self.judged_tests and not self.recorder.has_pending_image():
-            # a judge decides this test from its screenshots (FUNCTIONAL_TESTS_PLAN.md L25)
+            # a judge decides this test from its screenshots (LOAD_TESTS_PLAN.md L25)
             return (f"Not recorded: {test_id} is judged from screenshots, but you took no Screenshot since the "
                     "previous record_observation. Take a Screenshot of each state you explored, then record again.")
         missing = [e for e in evidence if not self._exists_in_run_dir(e)]

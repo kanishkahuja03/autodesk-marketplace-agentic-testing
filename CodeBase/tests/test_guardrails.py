@@ -148,7 +148,7 @@ def test_policy_still_applies_static_rules(run_dir):
 
 
 
-# ---------------------------------------------------------------- host rules (FUNCTIONAL_TESTS_PLAN.md L7, L9, L13, L14)
+# ---------------------------------------------------------------- host rules (LOAD_TESTS_PLAN.md L7, L9, L13, L14)
 HOST = HostLaunch(executable=r"C:\Program Files\Vendor\Host 2027\host.exe", args=["/product", "X", "/language", "en-US"],
                   processes=["host.exe"], main_window="^Host", new_document="Doc1")
 LAUNCH = {"mode": "launch_executable", "executable": HOST.executable, "args": HOST.args}

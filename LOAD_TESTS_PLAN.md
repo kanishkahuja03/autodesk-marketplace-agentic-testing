@@ -1,30 +1,38 @@
-# Implementation Plan: LOAD test (is the plug-in loaded in its host?), then FUNC
+# LOAD tests: is the app loaded by its host, and is its entry point there?
 
-> **Status:** v3 + **Phase 1b built 2026-10-14** (§9; first live run 20261014-153924, fixes L27/L28 after it), after the grill-me review on 2026-10-13 (questions Q1–Q17, all agreed). Branch `Dev-FunctionalTest`. **Code implemented 2026-10-13** (build steps 2–8 and 10 done, see §6). Recorded in ARCHITECTURE.md v2.3 as **D40–D57** and in ADR.md as ADR-033–040 (D53–D57 / L19 added after the live runs of 2026-10-13/14).
-> **Builds on:** [`ARCHITECTURE.md`](ARCHITECTURE.md) v2.2 (D1–D39), [`ADR.md`](ADR.md). The decisions in §3 go into ARCHITECTURE.md as D40+ and into ADR.md.
-> **v3 changes:** LOAD opens the host's **default new document** (not an app-specific one). Code adds a **built-in LOAD-000**, and Agent 1 writes **at most one** LOAD test. Code decides from the **raw UI tree** (`window_in_ui`, `seen_in_ui`). There is **one** Agent 2 session, protected by a "no uninstall while the host runs" guardrail. Host facts that code needs go in **YAML front matter** in the host notes. The host is **closed by Process kill**, and **preflight stops if the host is already running**. The **machine check is now build step 1**.
-> **Rule kept from D1:** nothing in the core code or the generic skills names Plant 3D, P&ID, a ribbon label or any plug-in. Product knowledge lives only in **host notes** (one Markdown file per host) and comes from the **app's own documents** at run time. P&ID examples appear only in tests and in `hosts/autocad-plant3d.md`.
+> **This document covers the LOAD tests only.** Functional tests (running the app's documented features) have their own plan: [`FUNC_TESTS_PLAN.md`](FUNC_TESTS_PLAN.md).
+> **Status (2026-10-14): built and verified.** Phase 1 (grill-me review 2026-10-13, Q1–Q17) and Phase 1b (LLM judge, leftovers, covered UI, generic skills, §9) are implemented. Live runs with generic skills: **20261014-175347** and **20261014-194215**, both 14 PASS (§10). Branch `Dev-FunctionalTest`.
+> **Recorded in:** [`ARCHITECTURE.md`](ARCHITECTURE.md) D40–D67 and [`ADR.md`](ADR.md) ADR-033–046. Decisions here are numbered L1–L29.
+> **How to read it:** §1 is the current design. §3–§8 are the Phase 1 design as agreed on 2026-10-13; parts of it are superseded (marked in the tables) by Phase 1b in §9. §10 lists the live runs.
+> **Rule kept from D1/D67:** nothing in the code or the skills names a product. App knowledge comes from the app's documents and files; host knowledge only from the host profile's front matter (data). The P&ID Connector Exporter examples are only examples.
 
 ---
 
-## 1. Goal (Phase 1)
+## 1. Goal and current design
 
-Today a run tests **ENV → INST → UNIN**. Phase 1 adds one category, **LOAD**, between install and uninstall:
+A run tests **ENV → INST → LOAD → UNIN**. LOAD sits between install and uninstall:
 
 ```
-ENV → INST → LOAD (start host → default new document → Snapshot → entry point in the UI tree) → kill host → UNIN
+ENV → INST → LOAD (start the host → new empty document → show the app's entry point) → kill host → UNIN
 ```
 
-| LOAD test | Written by | Decided by | Example for the P&ID Connector Exporter |
+| Test | Written by | Decided by | Example for the P&ID Connector Exporter |
 |---|---|---|---|
-| **LOAD-000** host ready with a new document | **code** (built-in, like ENV-000) | code: `window_in_ui` on the raw UI tree; Agent 2's report for dialogs | Plant 3D's main window, with a `Drawing1` document in it |
-| **LOAD-001** entry point visible | **Agent 1**, cited from the app's docs | code: `seen_in_ui` on the raw UI tree | UserGuide: *a new tab called "P&ID Exporter"* → an element named `P&ID Exporter` inside the host window |
+| **LOAD-000** host ready with a new document | **code** (built-in) | **code**: `window_in_ui` on the raw UI tree (host window, new document); Agent 2's report for dialogs | the Plant 3D main window with `Drawing1.dwg` |
+| **LOAD-001** the documented entry point is present | **Agent 1**, a cited claim | **LLM judge** from the screenshots (`judged`) | D2: *"a new tab called 'P&ID Exporter'"* → PASS with the finding "the app shows 'P&ID Connector'" |
+| **LOAD-002** its documented items are reachable | **Agent 1**, a cited claim (when the documents name items) | **LLM judge** from the screenshots | D2: *"The 'Export' button…"* → PASS with the finding "the app shows 'Export P&ID'" |
+| **UNIN-000** nothing left behind *(built-in, all apps)* | **code** | **code**: footprint before the install vs after the uninstall | 3 user-settings leftovers reported as findings |
 
-**What makes it generic:** Agent 1 reads only *app* facts from the app's documents: the entry point and its label. *Host* facts (how to start the host, its window titles, its processes, how to open a new document) come from **host notes**. Code reads those facts from the host notes' front matter. A different app on the same host changes only the documents; a different host only adds one host-notes file.
+**What makes it generic:**
+- **Agent 1** takes app facts only from the app's documents and files: the documents (D*), files inside the installer (I*), the app's own UI text (U1) and the installer facts (F1). It writes claims in the documents' words.
+- **Agent 2** follows generic principles (`host-interaction.md`): start the host exactly as given, decide on anything that appears, open a new empty document, *reveal never act*, make it visible, screenshot every claimed element.
+- **The judge** decides each claim from the screenshots. If what's shown matches only the app's own text, that's PASS with a documentation-mismatch finding.
+- **Code** decides the facts.
+- **Host knowledge is data**: the host profile's front matter (`host_process`, `releases`).
 
-**Demo acceptance (Phase 1):** one F5 run on the P&ID Exporter gives LOAD-000 PASS and LOAD-001 PASS (or NEEDS_REVIEW with a screenshot), the host is killed again, and UNIN still runs and passes.
+A different app on the same host needs no change. A different host needs one small host profile.
 
-**Out of scope for Phase 1:** app-specific documents (e.g. a P&ID drawing in a project), sample projects or existing files, clicking the app's tab or buttons, running its features (Export), checking output files, closing the host through its UI, a second host.
+**Out of scope here:** running the app's features → [`FUNC_TESTS_PLAN.md`](FUNC_TESTS_PLAN.md).
 
 ---
 
@@ -43,7 +51,7 @@ ENV → INST → LOAD (start host → default new document → Snapshot → entr
 
 ---
 
-## 3. Decisions (agreed in the grill-me session, 2026-10-13)
+## 3. Decisions (Phase 1, agreed in the grill-me session, 2026-10-13; later changes marked per row)
 
 | # | Question | Decision |
 |---|---|---|
@@ -69,9 +77,9 @@ ENV → INST → LOAD (start host → default new document → Snapshot → entr
 
 ---
 
-## 4. Design (Phase 1)
+## 4. Design (Phase 1, as built on 2026-10-13; see §9 for what changed)
 
-### 4.1 Agent 1: entry-point card and LOAD-001 (generic)
+### 4.1 Agent 1: entry-point card and LOAD-001 (generic) *(the `seen_in_ui` check is replaced by `judged` claims, L21)*
 The test-design skill gets a LOAD section. Agent 1 fills `summary.entry_point` (nullable; shown in `understanding.md`), with every field cited:
 
 | Field | Meaning | Example (derived, not hard-coded) |
@@ -117,7 +125,7 @@ The standard Markdown sections (for the agents) are:
 - **Where app entry points appear:** e.g. "plug-in ribbon tabs appear next to the built-in tabs; their names are in the UI tree".
 - **Close without saving:** kept for Phase 2. Phase 1 uses Process kill.
 
-### 4.3 Agent 2: host interaction (new generic skill)
+### 4.3 Agent 2: host interaction (new generic skill) *(now principles only, L24/L29)*
 `skills/execute/host-interaction.md` (generic, no product names):
 1. If the install exit code you recorded isn't a success value, record each LOAD test as `executed: false` ("install failed") and go to UNIN.
 2. Start the host with `App` `launch_executable`, using **exactly** the path and args from the App-under-test block. Wait with `WaitFor(condition=active_window, window_name=…)`, at most 105 s per call and at most twice.
@@ -180,7 +188,7 @@ The UI rules from the installer skill still apply: full paths only, no Run dialo
 
 | # | Step | Done when |
 |---|---|---|
-| 1 | **Machine check (manual, ~30 min). Partly done:** registry lookup (`ACAD-A117:409`, `AcadLocation`) and launch args (`/product PLNT3D /language "en-US"`, from the Start-menu shortcut) verified read-only. **Still open (needs a live Plant 3D session):** with the plug-in installed, start Plant 3D and confirm the launch args, the main-window title, the start screen (does it reopen a last or sample project?), the load prompt(s), the default new document and its title, whether the plug-in tab is in the UI tree, and the Snapshot size | `hosts/autocad-plant3d.md` filled in (front matter + sections); one raw Snapshot saved as `tests/fixtures/` |
+| 1 | **Machine check. Done through the live runs** (2026-10-13/14): title patterns, start page, plug-in notice, new document, palettes and the ribbon (not in the UI tree) were all seen; the host profile is now front matter only (L29). *Original scope:* registry lookup (`ACAD-A117:409`, `AcadLocation`) and launch args (`/product PLNT3D /language "en-US"`, from the Start-menu shortcut) verified read-only. **Still open (needs a live Plant 3D session):** with the plug-in installed, start Plant 3D and confirm the launch args, the main-window title, the start screen (does it reopen a last or sample project?), the load prompt(s), the default new document and its title, whether the plug-in tab is in the UI tree, and the Snapshot size | `hosts/autocad-plant3d.md` filled in (front matter + sections); one raw Snapshot saved as `tests/fixtures/` |
 | 2 | Models: LOAD, `window_in_ui`, `seen_in_ui`, NEEDS_REVIEW, entry-point card | **Done.** Strict-schema test passes; YAML round trip |
 | 3 | UI-tree parser + verdict (`window_in_ui`, `seen_in_ui`, NEEDS_REVIEW) | **Done** on a real Programs-and-Features Snapshot plus a made-up host tree in the same format (replace with the step-1 Plant 3D Snapshot). Found: Windows-MCP sometimes returns the Snapshot text as a JSON list of strings; the parser decodes it |
 | 4 | Self-check LOAD rules, built-in LOAD-000, `understanding.md` card | **Done.** Unit tests per rule |
@@ -188,7 +196,7 @@ The UI rules from the installer skill still apply: full paths only, no Run dialo
 | 6 | Skills: test-design LOAD section, `host-interaction.md` | **Written**; team review open. `test_skills` checks front matter and that generic files name no product |
 | 7 | `host.py`, preflight check, guardrail changes, App-under-test block, `finally` kill, 40 min limit | **Done.** A local `CodeBase/.env` with `AGENT2_TIMEOUT_MIN=20` still overrides the new default |
 | 8 | Report: NEEDS_REVIEW, screenshots and "Agent 2 said" with LOAD | **Done** |
-| 9 | Live run (elevated F5) | §7 acceptance |
+| 9 | Live run (elevated F5) | **Done**: see §10 |
 | 10 | Docs | **Done:** ARCHITECTURE.md v2.3 (D40–D52), ADR.md (ADR-033–036), AGENT_TOOLING_REVIEW.md |
 
 ---
@@ -227,7 +235,7 @@ The UI rules from the installer skill still apply: full paths only, no Run dialo
 
 ---
 
-## 9. Phase 1b: UI claims judged by an LLM (agreed and built 2026-10-14; live run pending)
+## 9. Phase 1b: UI claims judged by an LLM, leftovers, covered UI, generic skills (agreed and built 2026-10-14)
 
 ### 9.1 Why
 Run `20261014-124157` (11 PASS, 1 NEEDS_REVIEW) showed the limits of checking UI claims by exact strings:
@@ -279,7 +287,7 @@ Run `20261014-124157` (11 PASS, 1 NEEDS_REVIEW) showed the limits of checking UI
 | 4 | **Offline replay** on run `20261014-124157`: the judge gets screenshot 028 and the notes | **Done, twice, same result:** LOAD-001 PASS, finding *"Documentation mismatch: the documents say 'P&ID Exporter', the app shows 'P&ID Connector'"*, evidence `028_Screenshot_1.png`; the replayed run = 12 PASS |
 | 5 | Skills: test-design, host-interaction (L24) | **Written**; team review open |
 | 6 | Report: judgements and the Findings section (+ `FINDING` lines in `run.log`) | **Done** |
-| 7 | Live run (elevated F5) | LOAD-000 PASS (code), LOAD-001 and LOAD-002 judged with screenshots, findings listed |
+| 7 | Live run (elevated F5) | **Done**: see §10 |
 
 ### 9.6 Risks
 | Risk | Mitigation |
@@ -290,16 +298,20 @@ Run `20261014-124157` (11 PASS, 1 NEEDS_REVIEW) showed the limits of checking UI
 | Text in screenshots tries to instruct the judge | Untrusted-data rule in the judge skill, as for Agent 1 and Agent 2 |
 | Cost and time | One judge call per judged test (two per run here) |
 
-## 10. Phase 2 (later): running features (FUNC)
+## 10. Live runs and results
 
-**Open point from the grill (Q6):** NEEDS_REVIEW on LOAD-001 would block every FUNC test that depends on it. If step 1 or the live runs show that the entry point isn't in the UI tree, **fix the observation** (e.g. a host-notes recipe that makes it visible), don't weaken the precondition rule.
+| Run | Skills | Result | What it showed |
+|---|---|---|---|
+| 20261014-111858 | case-tuned | 10 PASS, 1 FAIL, 1 BLOCKED | the blanket "stop at any other dialog" rule failed LOAD-000 on the plug-in's harmless notice → dialogs decided by Agent 2 (L10, D56) |
+| 20261014-124157 | case-tuned | 11 PASS, 1 NEEDS_REVIEW | ribbon tabs aren't in the UI tree; the documents name the tab "P&ID Exporter", the app shows "P&ID Connector" → LLM judge and U1 (Phase 1b) |
+| 20261014-153924 | case-tuned | 11 PASS, 1 ERROR, 1 BLOCKED | the judge's closed event loop (fixed, D66); the plug-in's leftovers found by hand → UNIN-000 (L27) |
+| 20261014-162644 | case-tuned | **14 PASS** | first fully green run, three documentation-mismatch findings |
+| 20261014-175347 | **generic** | **14 PASS** | same verdicts and findings without any host or app knowledge in the skills, faster (L29, D67) |
+| 20261014-194215 | **generic**, clean machine | **14 PASS** | German plug-in UI handled without hints; UNIN-000 reported the plug-in's three user-settings leftovers |
 
-Kept from plan v1, to be grilled separately once Phase 1 works:
-- **Feature cards** for each documented feature (entry point, `use_context`, data kind, result, automatable yes/no). Only safe features become tests, max 3.
-- **App-specific context:** opening `use_context` documents (e.g. a P&ID drawing inside a project).
-- **Clicking the app's entry point:** select the tab, check the quoted `items` (e.g. `Export`).
-- **Test-data catalogue** (`test_data/catalogue.yaml`) of approved sample files, e.g. host-shipped sample projects; **code copies** them into `run/sandbox/` before Agent 2.
-- **File checks by code** (`file_exists`, `file_not_empty`, `json_valid`, `xml_valid`, `file_contains`) on outputs saved under `evidence\output\`.
-- **Clean host exit** ("the host exits with the app loaded, without errors") using the host notes' *Close without saving*.
-- Optional **host command channels** (startup script, COM) from host notes, instead of clicking.
-- Example for the P&ID Exporter: Export on a P&ID drawing writes valid, non-empty JSON; content correctness = NEEDS_REVIEW.
+**Open points for LOAD (none blocking):**
+- the judge could name "the app's UI is in another language than the host's" more explicitly;
+- the same documentation finding appears under LOAD-001 and LOAD-002 (the report could show it once);
+- a clean host profile per run (palettes, last template) stays deferred (D65).
+
+**FUNC (running features):** planned in [`FUNC_TESTS_PLAN.md`](FUNC_TESTS_PLAN.md) (decisions F1–F16, for a grill-me review). The open point from Q6 (a NEEDS_REVIEW on LOAD-001 must not block FUNC) is answered there by F8: FUNC depends on LOAD-000 only.

@@ -1,4 +1,4 @@
-"""Host notes front matter (FUNCTIONAL_TESTS_PLAN.md L9): the host facts code needs, read from skills/hosts/<id>.md.
+"""Host notes front matter (LOAD_TESTS_PLAN.md L9): the host facts code needs, read from skills/hosts/<id>.md.
 
 Shared by the design side (the built-in LOAD-000) and the execution side (launch, guardrails, verdict).
 Product knowledge stays in the host-notes files; nothing here names a product.

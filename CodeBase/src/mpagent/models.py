@@ -156,7 +156,7 @@ class InstallerFacts(BaseModel):
     bundles: list[BundleManifest] = []
     embedded_documents: list[EmbeddedDocument] = []
     ui_text: EmbeddedDocument | None = Field(
-        default=None, description="U1: readable UI text from the app's binaries (hints, FUNCTIONAL_TESTS_PLAN.md L22)")
+        default=None, description="U1: readable UI text from the app's binaries (hints, LOAD_TESTS_PLAN.md L22)")
     notable_files: list[str] = Field(default_factory=list, description="Files worth attention, with the reason")
     warnings: list[str] = []
 
@@ -210,9 +210,9 @@ class Check(str, Enum):
     NOT_EXISTS = "not_exists"
     CONTAINS = "contains"
     MATCHES = "matches"
-    # decided by code from the raw Snapshot UI tree, not from Agent 2's value (FUNCTIONAL_TESTS_PLAN.md L11)
+    # decided by code from the raw Snapshot UI tree, not from Agent 2's value (LOAD_TESTS_PLAN.md L11)
     WINDOW_IN_UI = "window_in_ui"  # value: regex of a window/document title inside the host window
-    # decided by the LLM judge from the test's screenshots (FUNCTIONAL_TESTS_PLAN.md L20, L21)
+    # decided by the LLM judge from the test's screenshots (LOAD_TESTS_PLAN.md L20, L21)
     JUDGED = "judged"  # value: the documented UI claim in plain words
 
 
@@ -284,7 +284,7 @@ VISIBLE_ENTRY_POINTS = {EntryPointKind.RIBBON_TAB, EntryPointKind.MENU, EntryPoi
 
 
 class EntryPoint(BaseModel):
-    """Where the app shows up in its host, as its documents describe it (FUNCTIONAL_TESTS_PLAN.md §4.1)."""
+    """Where the app shows up in its host, as its documents describe it (LOAD_TESTS_PLAN.md §4.1)."""
 
     kind: EntryPointKind
     label: str = Field(description="The exact text the UI should show, e.g. the ribbon tab name, copied from a source")
@@ -369,7 +369,7 @@ class HostLocate(BaseModel):
 
 
 class HostProcess(BaseModel):
-    """`host_process` front matter of a host-notes file: the host facts code needs (FUNCTIONAL_TESTS_PLAN.md L9)."""
+    """`host_process` front matter of a host-notes file: the host facts code needs (LOAD_TESTS_PLAN.md L9)."""
 
     locate: HostLocate
     executable: str = Field(description="File name inside the install folder, e.g. 'host.exe'")
@@ -388,7 +388,7 @@ class JudgeVerdict(str, Enum):
 
 
 class Judgement(BaseModel):
-    """The LLM judge's answer for one UI claim (FUNCTIONAL_TESTS_PLAN.md L20-L25). Strict output schema."""
+    """The LLM judge's answer for one UI claim (LOAD_TESTS_PLAN.md L20-L25). Strict output schema."""
 
     verdict: JudgeVerdict = Field(description="PASS, FAIL or NEEDS_REVIEW, by the rule in the judge skill")
     shown: str = Field(description="What the evidence actually shows about the claim, in plain words")

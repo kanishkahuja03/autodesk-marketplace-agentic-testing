@@ -71,7 +71,7 @@ def test_windows_mcp_failure_stops(tmp_path, monkeypatch):
 
 
 def test_running_host_stops(tmp_path, monkeypatch):
-    # FUNCTIONAL_TESTS_PLAN.md L12: a run would act in, and at the end kill, the user's own host session
+    # LOAD_TESTS_PLAN.md L12: a run would act in, and at the end kill, the user's own host session
     from mpagent.hostnotes import host_process
 
     monkeypatch.setattr(preflight, "is_elevated", lambda: True)

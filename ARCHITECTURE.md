@@ -1,6 +1,6 @@
 # Architecture V2: Generic Plug-in / App Validation Agents
 
-> **Status:** v2.2, 2026-10-13. This is the build plan for the product. v2.1 added the grill-me decisions D16–D35 (one F5 run, preflight, cleanup, logging, guardrails, `record_observation`). **v2.2** records what the live runs of 2026-10-12/13 taught (D24, D26, D27, D30, D32, D33 updated; D36–D39 new): silent uninstall instead of the UI, read-only FileSystem, per-run guardrail rules, cleaned and capped tool results, app facts in Agent 2's input. First clean run: `20261013-152426` (3 PASS). **v2.3** (2026-10-13, branch `Dev-FunctionalTest`) adds the **LOAD** test level from the grill-me review of [`FUNCTIONAL_TESTS_PLAN.md`](FUNCTIONAL_TESTS_PLAN.md) (D7, D8, D9, D16, D29, D35 updated; D40–D57 new; D58–D67 new).
+> **Status:** v2.2, 2026-10-13. This is the build plan for the product. v2.1 added the grill-me decisions D16–D35 (one F5 run, preflight, cleanup, logging, guardrails, `record_observation`). **v2.2** records what the live runs of 2026-10-12/13 taught (D24, D26, D27, D30, D32, D33 updated; D36–D39 new): silent uninstall instead of the UI, read-only FileSystem, per-run guardrail rules, cleaned and capped tool results, app facts in Agent 2's input. First clean run: `20261013-152426` (3 PASS). **v2.3** (2026-10-13, branch `Dev-FunctionalTest`) adds the **LOAD** test level from the grill-me review of [`LOAD_TESTS_PLAN.md`](LOAD_TESTS_PLAN.md) (D7, D8, D9, D16, D29, D35 updated; D40–D57 new; D58–D67 new).
 > **Supersedes:** [`ARCHITECTURE_old1.md`](ARCHITECTURE_old1.md) (v0.3). Where they disagree, **this document wins**, including over what is already in `CodeBase/`.
 > **Inputs to this version:** [`ARCHITECTURE_COMPARISON.md`](ARCHITECTURE_COMPARISON.md) (ours vs `AppStore automation/`), [`AGENT_TOOLING_REVIEW.md`](AGENT_TOOLING_REVIEW.md) (tool lists, one by one), [`DESKTOP_UI_AUTOMATION_RESEARCH.md`](DESKTOP_UI_AUTOMATION_RESEARCH.md). Decision index: [`ADR.md`](ADR.md).
 
@@ -76,9 +76,9 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 | D38 | App facts for Agent 2 | Code adds an **"App under test"** block to Agent 2's input: DisplayName, Publisher, Version, ProductCode, the three Uninstall registry paths with the ProductCode, the install roots expanded to real paths, and the machine's real folders (`%APPDATA%`, `%LOCALAPPDATA%`, `%USERPROFILE%`, `%ProgramFiles%`, …). Execution side only, so Agent 1 stays blind. *(Run 20261013-132121 guessed `C:\Users\Admin`, `C:\Users\User`.)* |
 | D39 | Stopping a run | **Ctrl+C in the console** interrupts Agent 2, and the `finally` steps (cleanup, verdicts, report) still run; the log then ends without a COMPLETED/STOPPED line. The VS **Stop** button or closing the console kills the process, so cleanup can't run; the next run then stops at ENV-000 and prints the exact `msiexec /x {ProductCode} /qn` command to remove the leftover. |
 
-### 2.4 LOAD tests (D40–D57, grill-me review of FUNCTIONAL_TESTS_PLAN.md, 2026-10-13)
+### 2.4 LOAD tests (D40–D57, grill-me review of LOAD_TESTS_PLAN.md, 2026-10-13)
 
-LOAD checks that the plug-in is **loaded by its host**: the host starts, opens a new document, and the app's entry point is visible. Details and reasoning: [`FUNCTIONAL_TESTS_PLAN.md`](FUNCTIONAL_TESTS_PLAN.md) §3 (L1–L18).
+LOAD checks that the plug-in is **loaded by its host**: the host starts, opens a new document, and the app's entry point is visible. Details and reasoning: [`LOAD_TESTS_PLAN.md`](LOAD_TESTS_PLAN.md) §3 (L1–L18).
 
 | # | Topic | Decision |
 |---|---|---|
@@ -102,7 +102,7 @@ LOAD checks that the plug-in is **loaded by its host**: the host starts, opens a
 | D57 | Test-case review | After Agent 1 writes `testcases.yaml` and `understanding.md`, the console lists every test (ID, category, priority, title) with both file paths and asks **"Go ahead and run them on this machine? [y/n]"**. `y` continues to the preflight; `n` (or Ctrl+C / end of input) ends the run as `STOPPED: test plan not approved at the review`, before anything is installed. Without a console (unit tests, redirected input) the run continues and the log says so. *(Requested by the seniors, 2026-10-14, so a recorded demo shows the plan being checked before it runs.)* |
 
 ### 2.5 UI claims judged by an LLM, leftovers, covered UI, generic skills (D58–D67, built 2026-10-14)
-Details and reasoning: [`FUNCTIONAL_TESTS_PLAN.md`](FUNCTIONAL_TESTS_PLAN.md) §9 (L20–L26). *(Run 20261014-124157: the guide says tab "P&ID Exporter"; the plug-in shows "P&ID Connector" with groups Tools / Settings, and its own DLLs contain exactly those words.)*
+Details and reasoning: [`LOAD_TESTS_PLAN.md`](LOAD_TESTS_PLAN.md) §9 (L20–L26). *(Run 20261014-124157: the guide says tab "P&ID Exporter"; the plug-in shows "P&ID Connector" with groups Tools / Settings, and its own DLLs contain exactly those words.)*
 
 | # | Topic | Decision |
 |---|---|---|

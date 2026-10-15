@@ -2,7 +2,7 @@
 
 One LLM agent with no tools reads the evidence pack and returns a TestPlan. Code self-checks the plan;
 on errors the agent gets them back and retries (at most 2 times). Then code adds the built-in ENV-000
-(and LOAD-000 for hosts with host_process, FUNCTIONAL_TESTS_PLAN.md L2) and writes testcases.yaml / testcases.json / understanding.md. Nothing on the machine is inspected.
+(and LOAD-000 for hosts with host_process, LOAD_TESTS_PLAN.md L2) and writes testcases.yaml / testcases.json / understanding.md. Nothing on the machine is inspected.
 """
 
 import io
@@ -165,7 +165,7 @@ def unin000(tests: list[TestCase]) -> TestCase:
 
 
 def load000(tests: list[TestCase], host: HostProcess) -> TestCase:
-    """LOAD-000 "host ready with a new document" (FUNCTIONAL_TESTS_PLAN.md L2, L11, L16). Same for every app
+    """LOAD-000 "host ready with a new document" (LOAD_TESTS_PLAN.md L2, L11, L16). Same for every app
     on a host: its regexes come from the host notes. Depends on the INST test(s) observing install_exit_code."""
     installs = [t.id for t in tests if t.category is Category.INST and "install_exit_code" in t.observe]
     return TestCase(

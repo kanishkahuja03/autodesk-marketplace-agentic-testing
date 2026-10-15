@@ -1,4 +1,4 @@
-"""The LLM judge for UI claims (FUNCTIONAL_TESTS_PLAN.md L20-L26, ARCHITECTURE.md D58-D61).
+"""The LLM judge for UI claims (LOAD_TESTS_PLAN.md L20-L26, ARCHITECTURE.md D58-D61).
 
 A separate model call with a fresh context decides whether a documented UI claim holds. It sees only the claim,
 its quotes, the app's own UI text (U1), the test's screenshots, the host-window part of its Snapshot texts and

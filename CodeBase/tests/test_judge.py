@@ -1,4 +1,4 @@
-"""Tests for the LLM judge's input (FUNCTIONAL_TESTS_PLAN.md L20-L25), without any model call. Run with: uv run pytest"""
+"""Tests for the LLM judge's input (LOAD_TESTS_PLAN.md L20-L25), without any model call. Run with: uv run pytest"""
 
 from plans import load_plan_data
 from test_ui_tree import HOST

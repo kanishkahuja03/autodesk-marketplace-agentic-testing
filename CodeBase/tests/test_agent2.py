@@ -152,7 +152,7 @@ def test_input_names_the_app_and_real_folders(tmp_path):
     assert os.path.expandvars(plugins) in prompt
 
 
-# ---------------------------------------------------------------- LOAD (FUNCTIONAL_TESTS_PLAN.md L5, L9, L17)
+# ---------------------------------------------------------------- LOAD (LOAD_TESTS_PLAN.md L5, L9, L17)
 def load_plan() -> TestPlan:
     from plans import load_plan_data
 

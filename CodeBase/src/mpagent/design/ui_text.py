@@ -1,4 +1,4 @@
-"""The app's own UI text (FUNCTIONAL_TESTS_PLAN.md L22, ARCHITECTURE.md D60): readable strings from the
+"""The app's own UI text (LOAD_TESTS_PLAN.md L22, ARCHITECTURE.md D60): readable strings from the
 binaries in the installer, as the citable source U1 for Agent 1 and for the judge.
 
 Windows UI text (.NET user strings and resources, Win32 string tables) is stored as UTF-16, so only UTF-16

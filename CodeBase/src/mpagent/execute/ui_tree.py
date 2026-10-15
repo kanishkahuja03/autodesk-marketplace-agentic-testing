@@ -1,4 +1,4 @@
-"""Reads the "UI Tree" section of a Windows-MCP Snapshot result (FUNCTIONAL_TESTS_PLAN.md L4, L11, L17).
+"""Reads the "UI Tree" section of a Windows-MCP Snapshot result (LOAD_TESTS_PLAN.md L4, L11, L17).
 
 A Snapshot's text has an "Opened Windows" table (every window title on the desktop, browser tabs and chats
 included) and a "UI Tree" structured per window:
