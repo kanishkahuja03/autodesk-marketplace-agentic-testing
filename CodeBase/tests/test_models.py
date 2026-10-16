@@ -45,6 +45,7 @@ summary:
     items: [Export]
     use_context: "in a P&ID project and have a drawing open"
     sources: [{ doc: "D2", line: 7, quote: "a new tab called “P&ID Exporter”" }]
+  features: []
   open_questions: ["ALLUSERS=1 but files go to %AppData%: which user profile?"]
 required_env: [PLUGIN_DIR, INSTALLER_PATH]
 testcases:
@@ -102,7 +103,22 @@ def test_plan_loads_from_yaml():
 
 def test_load_category_ui_checks_and_needs_review_exist():
     assert Category("LOAD") is Category.LOAD and Status("NEEDS_REVIEW") is Status.NEEDS_REVIEW
-    assert {Check("window_in_ui"), Check("judged")} == UI_CHECKS
+    assert {Check("window_in_ui"), Check("judged"), Check("output_created")} == UI_CHECKS
+    assert Category("FUNC") is Category.FUNC
+
+
+def test_feature_card_round_trips_and_keeps_the_action_class_in_range():
+    data = _yaml().load(SAMPLE_PLAN_YAML)
+    card = {"name": "Export", "how_started": "the 'Export' button", "context": "a P&ID drawing open",
+            "sample": None, "results": [{"doc": "D2", "line": 9, "quote": "export the entire drawing to a JSON file"}],
+            "sources": [], "action_class": 1, "testable": True, "reason": None, "test_id": "FUNC-001"}
+    data["summary"]["features"] = [card]
+    plan = TestPlan.model_validate(data)
+    assert plan.summary.features[0].action_class == 1 and plan.summary.features[0].results[0].doc == "D2"
+    assert TestPlan.model_validate_json(plan.model_dump_json()) == plan
+    data["summary"]["features"] = [{**card, "action_class": 4}]
+    with pytest.raises(ValidationError):
+        TestPlan.model_validate(data)
 
 
 def test_plan_round_trips_through_yaml_and_json():

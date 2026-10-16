@@ -16,6 +16,7 @@ EXPECTED = ["test-design/SKILL.md", "hosts/autocad-plant3d.md", "hosts/none.md",
 # Generic parts must not name a product (LOAD_TESTS_PLAN.md, rule kept from D1)
 PRODUCT_NAMES = re.compile(r"plant ?3d|autocad|acad|p&id", re.IGNORECASE)
 GENERIC_FILES = [SKILLS / "execute" / "host-interaction.md", SRC / "hostnotes.py", SRC / "execute" / "host.py",
+                 SRC / "execute" / "context.py", SRC / "design" / "samples.py",
                  SRC / "execute" / "ui_tree.py", SRC / "execute" / "verdict.py",
                  SKILLS / "execute" / "judge.md", SRC / "execute" / "judge.py", SRC / "design" / "ui_text.py"]
 
@@ -75,6 +76,15 @@ def test_action_policy_and_restart_rule_are_in_the_host_skill():
         assert phrase in host, phrase
     evidence = (SKILLS / "execute" / "evidence.md").read_text(encoding="utf-8")
     assert "Saved as evidence:" in evidence and "the reviewer sees those first" in evidence
+    # FUNC (FUNC_TESTS_PLAN.md F4, F5, F9): run only the named feature, save only into the output folder, tidy up
+    for phrase in ("## 7. FUNC tests", "**Run only the feature the test names**", ("**Save only into the test's output "
+                   "folder.**"), "**Tidy up before the next test:**", "never the original"):
+        assert phrase in host, phrase
+    assert "go only into that test's output folder" in evidence
+    design = (SKILLS / "test-design" / "SKILL.md").read_text(encoding="utf-8")
+    for phrase in ("## 4b. FUNC", "**A feature card for every feature", "**all four** hold",
+                   "**one `judged` claim per statement in `results`**", "check: output_created", "Never invent content"):
+        assert phrase in design, phrase
 
 
 def test_skills_hold_no_host_or_app_specific_knowledge():
@@ -83,6 +93,8 @@ def test_skills_hold_no_host_or_app_specific_knowledge():
                        re.IGNORECASE)
     for path in SKILLS.rglob("*.md"):
         text = path.read_text(encoding="utf-8")
+        if path.parent.name == "navigation":
+            continue  # host navigation files may name their host's UI (Q14); test_navigation_names_no_app checks them
         if path.parent.name == "hosts":
             text = text.split("\n---\n", 1)[1]  # front matter is data for code; check only the prose
             text = re.sub(r"^# Host: .*$|^An AutoCAD-based Autodesk product\..*$", "", text, flags=re.MULTILINE)
@@ -98,3 +110,33 @@ def test_uninstall_is_silent_and_files_are_read_only():
     assert "you never write, copy, move or delete files" in text
     design = (SKILLS / "test-design" / "SKILL.md").read_text(encoding="utf-8")
     assert "Silent uninstall finishes" in design and "Control Panel" not in design
+
+
+def test_navigation_file_is_named_by_the_host_profile_and_names_no_app():
+    # host-only navigation for Agent 2 (FUNC_TESTS_PLAN.md Q14): found through the host profile's front matter;
+    # it describes the host's own UI and never an app under test
+    from mpagent.execute import agent2
+    from mpagent.hostnotes import host_navigation
+
+    nav = host_navigation("autocad-plant3d", SKILLS / "hosts")
+    assert nav and "# Navigating AutoCAD Plant 3D" in nav and "host-interaction skill" in nav
+    assert host_navigation("none", SKILLS / "hosts") is None
+    app_words = re.compile(r"kleen|connector|exporter|revit|export p&id|json", re.IGNORECASE)
+    for path in (SKILLS / "hosts" / "navigation").glob("*.md"):
+        text = path.read_text(encoding="utf-8")
+        assert not app_words.search(text), f"{path.name}: {app_words.search(text).group()}"
+    assert "# Navigating AutoCAD Plant 3D" in agent2.instructions("autocad-plant3d", with_host_interaction=True)
+    assert "# Navigating" not in agent2.instructions("autocad-plant3d")  # only with the host tests
+
+
+def test_waitfor_takes_plain_text_and_load000_can_open_the_sample():
+    host = (SKILLS / "execute" / "host-interaction.md").read_text(encoding="utf-8")
+    assert "**plain text contained in the window title**" in host  # run 20261016-130450: a regex waited 105 s
+    assert '"LOAD-000 context"' in host and "keep working in it" in host
+
+
+def test_testability_is_judged_from_the_documents_not_from_u1():
+    # run 20261016-130450: Agent 1 marked a documented feature untestable from licence messages in U1
+    design = (SKILLS / "test-design" / "SKILL.md").read_text(encoding="utf-8")
+    assert "**Judge the four points from the documents (`D…`, `I…`) only.**" in design
+    assert "**`U1` never makes a feature untestable:**" in design

@@ -5,6 +5,7 @@ Pydantic checks types when an object is created and can save/load the object as 
 
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -186,6 +187,7 @@ class Category(str, Enum):
     ENV = "ENV"
     INST = "INST"
     LOAD = "LOAD"
+    FUNC = "FUNC"  # a documented feature is run and its result checked (FUNC_TESTS_PLAN.md)
     UNIN = "UNIN"
 
 
@@ -214,10 +216,12 @@ class Check(str, Enum):
     WINDOW_IN_UI = "window_in_ui"  # value: regex of a window/document title inside the host window
     # decided by the LLM judge from the test's screenshots (LOAD_TESTS_PLAN.md L20, L21)
     JUDGED = "judged"  # value: the documented UI claim in plain words
+    # decided by code from the test's output folder evidence/<test_id>/ (FUNC_TESTS_PLAN.md F7)
+    OUTPUT_CREATED = "output_created"  # value: null; PASS = at least one non-empty file in that folder
 
 
 # Checks decided from the evidence, never from Agent 2's own value
-UI_CHECKS = {Check.WINDOW_IN_UI, Check.JUDGED}
+UI_CHECKS = {Check.WINDOW_IN_UI, Check.JUDGED, Check.OUTPUT_CREATED}
 
 
 class Citation(BaseModel):
@@ -294,6 +298,25 @@ class EntryPoint(BaseModel):
     sources: list[Citation] = Field(description="Quotes for the label, items and use_context")
 
 
+class FeatureCard(BaseModel):
+    """One documented feature of the app and whether a FUNC test can run it (FUNC_TESTS_PLAN.md F1, §4.1)."""
+
+    name: str = Field(description="The feature's name exactly as the documents write it")
+    how_started: str = Field(description="The entry point or command the documents give to start it")
+    context: str | None = Field(
+        description="What must be open to use it, in the documents' words; null if the documents state nothing")
+    sample: str | None = Field(
+        description="Name of the sample (from the samples listing) that gives this context its content; null if none is needed or none fits")
+    results: list[Citation] = Field(
+        description="Each statement the documents make about the feature's result, one citation per statement")
+    sources: list[Citation] = Field(description="Quotes for the name, how it is started and its context")
+    action_class: Literal[0, 1, 2, 3] = Field(
+        description="The highest action class using it as documented needs: 0 view, 1 session, 2 reversible, 3 lasting")
+    testable: bool
+    reason: str | None = Field(description="If not testable: which point fails and why; null if testable")
+    test_id: str | None = Field(description="The FUNC test that runs this feature; null if not testable")
+
+
 class Summary(BaseModel):
     """Rendered into understanding.md."""
 
@@ -301,6 +324,7 @@ class Summary(BaseModel):
     install_footprint: list[str]
     commands_or_ui: list[str]
     entry_point: EntryPoint | None = Field(description="The app's entry point in the host UI; null if not documented")
+    features: list[FeatureCard] = Field(description="One card per documented feature; empty if none is documented")
     open_questions: list[str]
 
 
@@ -397,8 +421,15 @@ class Judgement(BaseModel):
     shown: str = Field(description="What the evidence actually shows about the claim, in plain words")
     differences: list[str] = Field(description="How the shown UI differs from the claim; empty if it doesn't")
     findings: list[str] = Field(description="Findings for the report, e.g. a documentation mismatch; may be empty")
-    evidence: list[str] = Field(description="The screenshot file(s) the verdict rests on, exactly as listed in the input")
+    evidence: list[str] = Field(description="The screenshot or output file(s) the verdict rests on, exactly as listed in the input")
     reason: str = Field(description="One short paragraph: why this verdict")
+
+
+class JudgedClaim(BaseModel):
+    """One `judged` claim of a test and the judge's answer to it (a FUNC test can have several, F16)."""
+
+    claim: Scalar
+    judgement: Judgement
 
 
 class TestResult(BaseModel):
@@ -412,7 +443,8 @@ class TestResult(BaseModel):
     checks: list[CheckResult]
     evidence: list[str]
     notes: str | None
-    judgement: Judgement | None = None
+    judgement: Judgement | None = None  # the last judged claim's answer (LOAD tests have exactly one)
+    judgements: list[JudgedClaim] = []  # every judged claim with its answer, in the test's order
     findings: list[str] = []
 
 

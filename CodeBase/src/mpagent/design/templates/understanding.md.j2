@@ -47,6 +47,24 @@
 {% else -%}
 - (not documented)
 {% endif %}
+## Features ({{ plan.summary.features | length }})
+{% if plan.summary.features -%}
+| Feature | How it is started | Context | Sample | Class | Test |
+|---|---|---|---|---|---|
+{% for f in plan.summary.features -%}
+| {{ f.name }} | {{ f.how_started }} | {{ f.context or "-" }} | {{ f.sample or "-" }} | {{ f.action_class }} | {{ f.test_id if f.testable else "not testable: " ~ (f.reason or "-") }} |
+{% endfor %}
+{% for f in plan.summary.features -%}
+**{{ f.name }}**, documented results:
+{% for c in f.results -%}
+- {{ c.doc }}{% if c.line %}:{{ c.line }}{% endif %}: "{{ c.quote }}"
+{% else -%}
+- (none documented)
+{% endfor %}
+{% endfor -%}
+{% else -%}
+- (no documented features)
+{% endif %}
 ## Open questions
 {% for q in plan.summary.open_questions -%}
 - {{ q }}

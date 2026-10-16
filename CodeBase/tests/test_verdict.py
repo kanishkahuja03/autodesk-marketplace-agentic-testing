@@ -260,3 +260,92 @@ def test_unin000_fails_on_program_leftovers_and_reports_settings_as_findings():
     assert statuses(evaluate(plan(), observations, set()))["UNIN-000"] is Status.FAIL
     observations[3] = obs("UNIN-001", uninstall_entry_exists=True)  # the uninstall didn't work
     assert statuses(evaluate(plan(), observations, set()))["UNIN-000"] is Status.BLOCKED
+
+
+def func_results(tmp_path, files: dict[str, bytes]):
+    from mpagent.execute.verdict import output_dir
+    from mpagent.models import Category, Citation, TestCase
+
+    p = plan()
+    p.testcases.append(TestCase(
+        id="FUNC-001", origin="agent", category=Category.FUNC, title="Export writes a file",
+        source=Citation(doc="D2", line=None, quote="export"), preconditions=["INST-001"], steps=["Run the feature"],
+        observe=["output_files"], priority="P1",
+        expected=[Expectation(key="output_files", check=Check.OUTPUT_CREATED, value=None, values=None)]))
+    for name, data in files.items():
+        path = output_dir(tmp_path, "FUNC-001") / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    observations = happy() + [obs("FUNC-001", output_files="Agent 2 says it saved out.json")]
+    return {r.test_id: r for r in evaluate(p, observations, set(), UiContext(tmp_path, None))}["FUNC-001"]
+
+
+def test_output_created_is_decided_from_the_test_folder_not_from_agent2(tmp_path):
+    passed = func_results(tmp_path, {"out.json": b"{}", "sub/empty.txt": b""})
+    assert passed.status is Status.PASS
+    assert passed.checks[0].observed == "evidence/FUNC-001/out.json"
+    assert passed.checks[0].reported == "Agent 2 says it saved out.json"
+
+
+def test_output_created_fails_without_a_non_empty_file(tmp_path):
+    assert func_results(tmp_path, {}).checks[0].observed == "no file"
+    assert func_results(tmp_path, {}).status is Status.FAIL
+    empty = func_results(tmp_path / "e", {"out.json": b""})
+    assert empty.status is Status.FAIL and empty.checks[0].observed == "empty files only"
+
+
+def func_plan() -> TestPlan:
+    from test_selfcheck import func_plan_data
+    return add_built_in_tests(TestPlan.model_validate(func_plan_data()), FACTS, host_process("autocad-plant3d"))
+
+
+def func_judged_results(tmp_path, answers: list[Judgement]):
+    """FUNC-001 with two judged claims and output_created; the judge answers in order."""
+    from mpagent.execute.verdict import output_dir
+
+    out = output_dir(tmp_path, "FUNC-001")
+    out.mkdir(parents=True)
+    (out / "result.json").write_text('{"assets": []}', encoding="utf-8")
+    o000 = ui_obs(tmp_path, "LOAD-000", HOST, host_started=True, document_opened=True, error_dialog_seen=False,
+                  load_prompt_seen=False)
+    o001 = ui_obs(tmp_path, "LOAD-001", HOST, entry_point_seen="a tab")
+    ofunc = ui_obs(tmp_path, "FUNC-001", None, feature_result_seen="a file was saved", output_files="result.json")
+    queue = list(answers)
+
+    def judge(t, e, o):  # LOAD tests: PASS on their own screenshot; FUNC claims: the given answers in order
+        if t.category.value == "LOAD":
+            return judgement(evidence=[next(x for x in o.evidence if x.endswith(".png"))])
+        return queue.pop(0)
+    ui = UiContext(tmp_path, host_process("autocad-plant3d").main_window, judge)
+    return {r.test_id: r for r in evaluate(func_plan(), happy() + [o000, o001, ofunc], set(), ui)}["FUNC-001"]
+
+
+def test_every_judged_claim_of_a_func_test_is_kept_with_its_findings(tmp_path):
+    first = judgement(evidence=["evidence/FUNC-001_Screenshot_1.png"], findings=["finding one"])
+    second = judgement("NEEDS_REVIEW", evidence=["evidence/FUNC-001/result.json"], findings=["finding two"])
+    r = func_judged_results(tmp_path, [first, second])  # the two FUNC claims
+    assert r.status is Status.NEEDS_REVIEW
+    assert [jc.claim for jc in r.judgements] == ["The “Export” button exports the entire drawing to a JSON file",
+                                                 "The file holds assets and lines"]
+    assert r.findings == ["finding one", "finding two"]
+    assert r.judgements[1].judgement.evidence == ["evidence/FUNC-001/result.json"]  # an output file may be cited
+    assert "evidence/FUNC-001/result.json" in r.evidence  # the produced file is attached to the result
+    assert [c.ok for c in r.checks] == [True, False, True]  # the last check is output_created
+
+
+def test_func_report_shows_each_claim(tmp_path):
+    from mpagent.execute.observations import save_observation as save
+    from mpagent.execute.verdict import output_dir
+
+    for o in happy() + [ui_obs(tmp_path, "LOAD-000", HOST, host_started=True, document_opened=True,
+                               error_dialog_seen=False, load_prompt_seen=False),
+                        ui_obs(tmp_path, "LOAD-001", HOST, entry_point_seen="a tab"),
+                        ui_obs(tmp_path, "FUNC-001", None, feature_result_seen="saved", output_files="r.json")]:
+        save(tmp_path, o)
+    output_dir(tmp_path, "FUNC-001").mkdir(parents=True)
+    (output_dir(tmp_path, "FUNC-001") / "r.json").write_text("{}", encoding="utf-8")
+    run = write_report(func_plan(), tmp_path,
+                       judge=lambda t, e, o: judgement(evidence=[next(x for x in o.evidence if x.endswith(".png"))]))
+    assert run.counts["PASS"] == 8
+    html = (tmp_path / "report.html").read_text(encoding="utf-8")
+    assert "The file holds assets and lines" in html and 'href="evidence/FUNC-001/r.json"' in html

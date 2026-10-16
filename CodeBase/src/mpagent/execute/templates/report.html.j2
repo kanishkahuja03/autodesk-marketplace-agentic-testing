@@ -63,15 +63,15 @@
             <div class="muted">Agent 2's description: <code>{{ c.reported }}</code></div>{% endif %}</td>
           {% if c.ok %}<td class="PASS">✔</td>{% elif c.needs_review %}<td class="NEEDS_REVIEW">?</td>{% else %}<td class="FAIL">✘</td>{% endif %}</tr>{% endfor %}
       </table></div>{% endif %}
-      {% if r.judgement %}{% set j = r.judgement %}<div class="judge">
-        <div class="muted">Decided by the LLM judge from the screenshots</div>
-        <p><b>Claim:</b> {{ t.expected[0].value }}</p>
+      {% for jc in r.judgements %}{% set j = jc.judgement %}<div class="judge">
+        <div class="muted">Decided by the LLM judge from the evidence</div>
+        <p><b>Claim:</b> {{ jc.claim }}</p>
         <p><b>Verdict:</b> <span class="status {{ j.verdict.value }}">{{ j.verdict.value }}</span> — {{ j.reason }}</p>
         <p><b>Shown:</b> {{ j.shown }}</p>
         {% if j.differences %}<p><b>Differences:</b></p><ul>{% for d in j.differences %}<li>{{ d }}</li>{% endfor %}</ul>{% endif %}
         {% if j.findings %}<p><b>Findings:</b></p><ul>{% for f in j.findings %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
-        <div class="muted">Screenshot(s) the verdict rests on</div>{% for e in j.evidence %}<a href="{{ e }}"><img src="{{ e }}" alt="{{ e }}"></a>{% endfor %}
-      </div>{% endif %}
+        <div class="muted">Evidence the verdict rests on</div>{% for e in j.evidence %}{% if e.lower().endswith((".png", ".jpg", ".jpeg")) %}<a href="{{ e }}"><img src="{{ e }}" alt="{{ e }}"></a>{% else %}<div><a href="{{ e }}">{{ e }}</a></div>{% endif %}{% endfor %}
+      </div>{% endfor %}
       {% if r.notes %}<p><span class="muted">Notes:</span> {{ r.notes }}</p>{% endif %}
       {% if r.evidence %}<div class="muted">Evidence</div>
         {% for e in r.evidence %}{% if e.lower().endswith((".png", ".jpg", ".jpeg")) %}<a href="{{ e }}"><img src="{{ e }}" alt="{{ e }}"></a>{% else %}<div><a href="{{ e }}">{{ e }}</a></div>{% endif %}{% endfor %}

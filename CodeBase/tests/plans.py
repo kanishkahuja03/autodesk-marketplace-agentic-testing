@@ -15,7 +15,7 @@ def good_plan_data() -> dict:
                           "product_code": "{DFA9AB30-EDDB-4E96-BFF7-086145A9E483}", "signer_claimed": "Kleen Software GmbH"},
         },
         "summary": {"purpose": "Exports P&ID symbols to an interface file.", "install_footprint": [],
-                    "commands_or_ui": [], "entry_point": None, "open_questions": []},
+                    "commands_or_ui": [], "entry_point": None, "features": [], "open_questions": []},
         "required_env": ["INSTALLER_PATH"],
         "testcases": [
             _test("INST-001", "INST", "properties.ProductName = P&ID Connector Exporter Plant3D", [],

@@ -21,9 +21,11 @@ from mpagent.design.selfcheck import PLACEHOLDER, texts_of
 from mpagent.execute import ui_tree
 from mpagent.models import (
     UI_CHECKS,
+    Category,
     Check,
     CheckResult,
     Expectation,
+    JudgedClaim,
     Judgement,
     JudgeVerdict,
     Observation,
@@ -35,6 +37,7 @@ from mpagent.models import (
 )
 
 ALWAYS_KNOWN = {"INSTALLER_PATH", "RUN_DIR"}  # given to Agent 2 by code
+EVIDENCE_DIR = "evidence"
 UI_TEXT_SUFFIX = "_Snapshot_ui.txt"  # raw Snapshot text saved by the call recorder
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg")
 
@@ -111,15 +114,18 @@ def evaluate(plan: TestPlan, observations: list[Observation], resolved_env: set[
 def _evaluate_test(t: TestCase, obs: Observation | None, resolved_env: set[str] | None, ui: UiContext,
                    preconditions: dict[str, TestResult]) -> TestResult:
     evidence = list(obs.evidence) if obs else []
+    if t.category is Category.FUNC and ui.run_dir is not None:  # the files the test produced (F7)
+        evidence += [f for f in output_files(ui.run_dir, t.id) if f not in evidence]
     notes = obs.notes if obs else None
 
-    judgement: Judgement | None = None
+    judged: list[JudgedClaim] = []
 
     def result(status: Status, checks: list[CheckResult], reason: str | None) -> TestResult:
         joined = "; ".join(x for x in (reason, notes) if x) or None
+        findings = [f for j in judged for f in j.judgement.findings] if judged else list(obs.findings) if obs else []
         return TestResult(test_id=t.id, origin=t.origin, status=status, checks=checks, evidence=evidence, notes=joined,
-                          judgement=judgement,
-                          findings=list(judgement.findings) if judgement else list(obs.findings) if obs else [])
+                          judgement=judged[-1].judgement if judged else None, judgements=judged,
+                          findings=list(dict.fromkeys(findings)))
 
     not_passed = [f"{p} is {r.status.value}" for p, r in preconditions.items() if r.status is not Status.PASS]
     if not_passed:
@@ -142,6 +148,14 @@ def _evaluate_test(t: TestCase, obs: Observation | None, resolved_env: set[str] 
         if e.check is Check.JUDGED:
             check, problem, judgement = _judged_check(t, e, obs, ui, values.get(e.key))
             checks.append(check)
+            if judgement:
+                judged.append(JudgedClaim(claim=e.value, judgement=judgement))
+            if problem:
+                ui_errors.append(problem)
+            continue
+        if e.check is Check.OUTPUT_CREATED:
+            check, problem = _output_check(t, e, ui, values.get(e.key))
+            checks.append(check)
             if problem:
                 ui_errors.append(problem)
             continue
@@ -160,9 +174,7 @@ def _evaluate_test(t: TestCase, obs: Observation | None, resolved_env: set[str] 
     if missing or ui_errors:
         reasons = (["no value observed for " + ", ".join(missing)] if missing else []) + ui_errors
         return result(Status.ERROR, checks, "; ".join(reasons))
-    if any(not c.ok and not c.needs_review for c in checks):
-        return result(Status.FAIL, checks, None)
-    judged_reason = f"judge: {judgement.reason}" if judgement else None
+    judged_reason = "; ".join(f"judge: {j.judgement.reason}" for j in judged) or None
     if any(not c.ok and not c.needs_review for c in checks):
         return result(Status.FAIL, checks, judged_reason)
     if any(c.needs_review for c in checks):
@@ -180,6 +192,7 @@ def _judged_check(t: TestCase, e: Expectation, obs: Observation, ui: UiContext,
                            needs_review=review, reported=reported)
 
     shots = [r for r in obs.evidence if r.lower().endswith(IMAGE_SUFFIXES)]
+    files = output_files(ui.run_dir, t.id) if ui.run_dir is not None else []  # content claims may rest on these
     if not shots:
         return make(None), f"{e.key}: no screenshot attached; a UI claim is never judged from notes alone", None
     if ui.judge is None:
@@ -190,6 +203,9 @@ def _judged_check(t: TestCase, e: Expectation, obs: Observation, ui: UiContext,
         return make(None), f"{e.key}: the judge call failed ({type(ex).__name__}: {ex})", None
     names = {s: s for s in shots} | {Path(s).name: s for s in shots}
     cited = [names[x.replace("\\", "/")] for x in judgement.evidence if x.replace("\\", "/") in names]
+    attached = {f: f for f in files} | {Path(f).name: f for f in files}
+    cited += [attached[x.replace("\\", "/")] for x in judgement.evidence
+              if x.replace("\\", "/") in attached and x.replace("\\", "/") not in names]
     if not cited:
         problem = (f"{e.key}: the judge named no screenshot attached to this test "
                    f"({', '.join(judgement.evidence) or 'none'})")
@@ -213,3 +229,32 @@ def _ui_check(e: Expectation, obs: Observation, ui: UiContext, reported: Scalar)
         return make(None, False), f"{e.key}: no Snapshot was attached to this observation"
     ok = ui_tree.window_in_ui(texts, ui.main_window, str(e.value))
     return make("seen" if ok else "not seen", ok), None
+
+
+def output_dir(run_dir: Path, test_id: str) -> Path:
+    """Where everything the app under test produces in this test is saved (FUNC_TESTS_PLAN.md F5)."""
+    return run_dir / EVIDENCE_DIR / test_id
+
+
+def output_files(run_dir: Path, test_id: str) -> list[str]:
+    """Every file in the test's output folder, relative to the run folder."""
+    folder = output_dir(run_dir, test_id)
+    if not folder.is_dir():
+        return []
+    return [p.relative_to(run_dir).as_posix() for p in sorted(folder.rglob("*")) if p.is_file()]
+
+
+def _output_check(t: TestCase, e: Expectation, ui: UiContext, reported: Scalar) -> tuple[CheckResult, str | None]:
+    """`output_created` (F7): at least one non-empty file in the test's output folder. Decided from the folder,
+    never from Agent 2's value; the call recorder never writes there, so every file in it came from the test."""
+
+    def make(observed: Scalar, ok: bool) -> CheckResult:
+        return CheckResult(key=e.key, check=e.check, expected=None, observed=observed, ok=ok, reported=reported)
+
+    if ui.run_dir is None:
+        return make(None, False), f"{e.key}: no run folder to look in"
+    files = output_files(ui.run_dir, t.id)
+    non_empty = [f for f in files if (ui.run_dir / f).stat().st_size > 0]
+    if non_empty:
+        return make(", ".join(non_empty), True), None
+    return make("empty files only" if files else "no file", False), None

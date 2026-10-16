@@ -221,14 +221,14 @@ def test_load_tests_need_their_evidence_before_recording(tmp_path):
 
 
 def test_host_interaction_skill_and_host_block_only_with_load(tmp_path):
-    assert "# Host interaction: LOAD tests" in agent2.instructions("autocad-plant3d", with_host_interaction=True)
+    assert "# Host interaction: LOAD and FUNC tests" in agent2.instructions("autocad-plant3d", with_host_interaction=True)
     assert "# Host interaction" not in agent2.instructions("autocad-plant3d")
     assert agent2.host_launch(plan()) is None  # no LOAD tests in the plan
     host = agent2.HostLaunch(executable=r"C:\Host\host.exe", args=["/a", "b"], processes=["host.exe"],
                              main_window="^Host", new_document="Doc1")
     prompt = agent2.build_input(load_plan(), tmp_path, tmp_path / "x.msi", None, FACTS, host)
     assert r"- executable: C:\Host\host.exe" in prompt and '- args: ["/a", "b"]' in prompt
-    assert "(ENV, INST, LOAD, UNIN)" in prompt
+    assert "(ENV, INST, LOAD, FUNC, UNIN)" in prompt
     missing = agent2.build_input(load_plan(), tmp_path, tmp_path / "x.msi", None, FACTS,
                                  agent2.HostLaunch(None, [], ["host.exe"], "^Host", "Doc1"))
     assert "NOT FOUND" in missing and "executed: false" in missing
@@ -246,3 +246,57 @@ def test_install_test_cannot_be_recorded_as_executed_without_running_the_install
     assert obs.record("INST-001", False, exit_code, [], "not reached") == "Recorded INST-001."
     policy.installed = True
     assert obs.record("INST-001", True, [KeyValue(key="install_exit_code", value=0)], [], None) == "Recorded INST-001."
+
+
+def func_plan() -> TestPlan:
+    from test_selfcheck import func_plan_data
+
+    from mpagent.design.agent1 import add_built_in_tests
+    from mpagent.hostnotes import host_process
+    return add_built_in_tests(TestPlan.model_validate(func_plan_data()), FACTS, host_process("autocad-plant3d"))
+
+
+def test_func_tests_get_an_output_folder_and_a_copy_of_their_sample(tmp_path):
+    from mpagent.execute.context import func_block, prepare_func_tests
+
+    samples = tmp_path / "SampleProject"  # SAMPLES_DIR is the sample itself (Q14)
+    (samples / "Docs").mkdir(parents=True)
+    (samples / "Docs" / "a.dat").write_bytes(b"data")
+    run_dir = tmp_path / "run"
+    [setup] = prepare_func_tests(func_plan(), run_dir, samples)
+    assert setup.output == run_dir / "evidence" / "FUNC-001" and setup.output.is_dir() and not any(setup.output.iterdir())
+    assert setup.context == run_dir / "context" / "SampleProject"
+    assert (setup.context / "Docs" / "a.dat").read_bytes() == b"data"
+    block = func_block([setup])
+    assert f"open this copy of the sample 'SampleProject' through the host's UI: {setup.context}" in block
+    assert f"output folder (save everything the app produces in this test here): {setup.output}" in block
+
+    [missing] = prepare_func_tests(func_plan(), tmp_path / "run2", None)
+    assert missing.context is None and "SAMPLES_DIR is not set" in missing.problem
+    assert "record this test with executed: false" in func_block([missing])
+    assert func_block(prepare_func_tests(plan(), tmp_path / "run3", samples)) == ""  # no FUNC tests
+
+
+def test_func_tests_start_the_host_and_raise_the_limits(tmp_path, monkeypatch):
+    settings = replace(load_settings(), agent2_timeout_min=40, agent2_max_turns=150, agent2_func_min_per_test=10,
+                       agent2_func_turns_per_test=40)
+    assert agent2.limits(func_plan(), settings) == (50, 190)
+    assert agent2.limits(plan(), settings) == (40, 150)
+    p = func_plan()
+    p.testcases = [t for t in p.testcases if t.category.value != "LOAD"]
+    monkeypatch.setattr(agent2.host_mod, "resolve", lambda hp: "resolved")
+    assert agent2.host_launch(p) == "resolved"  # FUNC tests alone also need the host
+
+
+def test_load000_gets_the_sample_copy_and_func_tests_reuse_it(tmp_path):
+    from mpagent.execute.context import func_block, prepare_func_tests
+
+    sample = tmp_path / "SampleProject"
+    sample.mkdir()
+    (sample / "a.dat").write_bytes(b"x")
+    setups = prepare_func_tests(func_plan(), tmp_path / "run", sample)
+    block = func_block(setups, "SampleProject")
+    assert block.startswith("LOAD-000 context: open this copy of the sample 'SampleProject'")
+    assert "the copy of the sample 'SampleProject' that LOAD-000 opened" in block
+    missing = func_block(prepare_func_tests(func_plan(), tmp_path / "run2", None), "SampleProject")
+    assert "record LOAD-000 with executed: false" in missing

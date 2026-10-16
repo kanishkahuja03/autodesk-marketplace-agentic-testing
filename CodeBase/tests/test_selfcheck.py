@@ -233,3 +233,132 @@ def test_load001_is_required_for_a_visible_entry_point():
         d["summary"]["entry_point"]["kind"] = "command"
     assert load_errors(drop_command) == []  # not visible after start: no LOAD test needed
     assert load_errors(drop, load_hosts=()) == []  # host without host_process
+
+
+# ---------------------------------------------------------------- FUNC rules (FUNC_TESTS_PLAN.md §4.1, F1, F13, F16)
+FUNC_DOC = ("For the export to take place, the user must be in a P&ID project and have a drawing open.\n"
+            "The “Export” button is used to export the entire drawing to a JSON file.\n"
+            "The exported data are assets and lines, as well as all associated P&ID properties.")
+FUNC_SOURCES = LOAD_SOURCES + [Source("D3", "Guide.txt", FUNC_DOC)]
+RESULT_1 = "export the entire drawing to a JSON file"
+RESULT_2 = "The exported data are assets and lines"
+
+
+def _cite(quote: str) -> dict:
+    return {"doc": "D3", "line": None, "quote": quote}
+
+
+def func_plan_data() -> dict:
+    """load_plan_data() plus one testable feature card (with a sample) and its FUNC-001."""
+    from plans import _test
+
+    data = load_plan_data()
+    data["summary"]["features"] = [{
+        "name": "Export", "how_started": "The “Export” button", "context": "in a P&ID project and have a drawing open",
+        "sample": "SampleProject", "results": [_cite(RESULT_1), _cite(RESULT_2)],
+        "sources": [_cite("The “Export” button is used to export"), _cite("must be in a P&ID project")],
+        "action_class": 1, "testable": True, "reason": None, "test_id": "FUNC-001"}]
+    func = _test("FUNC-001", "FUNC", "", ["LOAD-000"], ["Open the given context, start “Export”, save the result"],
+                 ["feature_result_seen", "output_files"],
+                 [{"key": "feature_result_seen", "check": "judged", "value": "The “Export” button exports the entire "
+                   "drawing to a JSON file", "values": None},
+                  {"key": "feature_result_seen", "check": "judged", "value": "The file holds assets and lines",
+                   "values": None},
+                  {"key": "output_files", "check": "output_created", "value": None, "values": None}])
+    func["source"] = _cite("The “Export” button is used to export")
+    data["testcases"].insert(3, func)
+    return data
+
+
+def func_errors(edit=lambda d: None, samples=("SampleProject",), load_hosts=("autocad-plant3d",)) -> list[str]:
+    data = copy.deepcopy(func_plan_data())
+    edit(data)
+    return check_plan(TestPlan.model_validate(data), FUNC_SOURCES, HOSTS, load_hosts, samples)
+
+
+def _card(d: dict) -> dict:
+    return d["summary"]["features"][0]
+
+
+def _func(d: dict) -> dict:
+    return next(t for t in d["testcases"] if t["id"] == "FUNC-001")
+
+
+def test_good_func_plan_passes():
+    assert func_errors() == []
+
+
+def test_feature_card_quotes_and_sample_are_checked():
+    errors = func_errors(lambda d: _card(d)["results"].append(_cite("exports to Excel")))
+    assert any("results[2]: quote not found in D3" in e for e in errors)
+    assert any("SampleProject" in e and "not in the samples listing (none are available)" in e
+               for e in func_errors(samples=()))
+
+
+def test_testable_card_needs_its_test_and_untestable_card_a_reason():
+    assert any("test_id must name the FUNC test" in e for e in func_errors(lambda d: _card(d).update(test_id=None)))
+
+    def untestable(d):
+        _card(d).update(testable=False, reason=None)
+    errors = func_errors(untestable)
+    assert any("'reason' must say which point fails" in e for e in errors)
+    assert any("test_id must be null" in e for e in errors)
+    assert any("FUNC-001: no testable feature card" in e for e in errors)
+    assert any("class 3 (lasting)" in e for e in func_errors(lambda d: _card(d).update(action_class=3)))
+
+
+def test_one_judged_claim_per_documented_result():
+    errors = func_errors(lambda d: _func(d)["expected"].pop(1))
+    assert any("one 'judged' claim per documented result" in e and "(2 results, 1 claims)" in e for e in errors)
+
+
+def test_func_preconditions_checks_and_quoted_names():
+    errors = func_errors(lambda d: _func(d).update(preconditions=["LOAD-000", "LOAD-001"]))
+    assert any("FUNC-001: preconditions must be ['LOAD-000']" in e for e in errors)
+    errors = func_errors(lambda d: _func(d)["expected"].append(
+        {"key": "feature_result_seen", "check": "equals", "value": "x", "values": None}))
+    assert any("uses only 'judged' claims and 'output_created'" in e for e in errors)
+    errors = func_errors(lambda d: _func(d)["expected"][0].update(value="The “Export all” button works"))
+    assert any("the claim names 'Export all'" in e for e in errors)
+
+
+def test_output_created_only_in_func_and_unin_never_depends_on_func():
+    def misuse(d):
+        unin = next(t for t in d["testcases"] if t["id"] == "UNIN-001")
+        unin["preconditions"].append("FUNC-001")
+        unin["expected"].append({"key": "uninstall_entry_exists", "check": "output_created", "value": None,
+                                 "values": None})
+    errors = func_errors(misuse)
+    assert any("UNIN-001: check 'output_created' is only for FUNC tests" in e for e in errors)
+    assert any("never on LOAD or FUNC" in e for e in errors)
+
+
+def test_func_tests_run_in_class_order_and_need_a_host_with_host_process():
+    def class2_first(d):
+        second = copy.deepcopy(_func(d))
+        second["id"] = "FUNC-002"
+        d["testcases"].insert(4, second)
+        d["summary"]["features"].append({**copy.deepcopy(_card(d)), "test_id": "FUNC-002"})
+        _card(d)["action_class"] = 2
+    assert any("FUNC-002: FUNC tests run in class order" in e for e in func_errors(class2_first))
+    assert any("no FUNC support" in e for e in func_errors(load_hosts=()))
+
+
+def test_samples_folder_is_listed_not_opened(tmp_path):
+    from mpagent.design.samples import list_samples, render_samples
+
+    # SAMPLES_DIR is one sample (Q14): a folder (e.g. a project) or a single file
+    (tmp_path / "Project" / "Docs").mkdir(parents=True)
+    (tmp_path / "Project" / "Docs" / "a.dat").write_bytes(b"12345")
+    (tmp_path / "Project" / "main.cfg").write_bytes(b"1")
+    (tmp_path / "single.dat").write_bytes(b"123")
+    [project] = list_samples(tmp_path / "Project")
+    assert (project.name, project.path, project.total_files, project.total_bytes) == ("Project", tmp_path / "Project",
+                                                                                       2, 6)
+    assert project.files == [("Docs/a.dat", 5), ("main.cfg", 1)]
+    text = render_samples([project])
+    assert '<sample name="Project" kind="folder" files="2" bytes="6">' in text and "Docs/a.dat (5 bytes)" in text
+    [single] = list_samples(tmp_path / "single.dat")
+    assert single.files == [("single.dat", 3)] and 'kind="file"' in render_samples([single])
+    assert list_samples(None) == [] and list_samples(tmp_path / "missing") == []
+    assert "No samples are available" in render_samples([])

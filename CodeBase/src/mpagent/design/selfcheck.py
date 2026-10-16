@@ -14,6 +14,7 @@ from mpagent.models import (
     Category,
     Check,
     Citation,
+    FeatureCard,
     Origin,
     TestCase,
     TestPlan,
@@ -23,7 +24,7 @@ BUILT_IN_ENV_ID = "ENV-000"
 BUILT_IN_LOAD_ID = "LOAD-000"  # added by code when the host notes have host_process (LOAD_TESTS_PLAN.md L2)
 BUILT_IN_UNIN_ID = "UNIN-000"  # "nothing left behind", decided by code after Agent 2 (ARCHITECTURE.md D64)
 BUILT_IN_IDS = {BUILT_IN_ENV_ID, BUILT_IN_LOAD_ID, BUILT_IN_UNIN_ID}
-ID_PATTERN = re.compile(r"^(ENV|INST|LOAD|UNIN)-\d{3}$")
+ID_PATTERN = re.compile(r"^(ENV|INST|LOAD|FUNC|UNIN)-\d{3}$")
 PLACEHOLDER = re.compile(r"\$\{([A-Za-z0-9_]+)\}")
 USER_PROFILE_PATH = re.compile(r"[A-Za-z]:\\Users\\", re.IGNORECASE)
 NEEDS_VALUE = {Check.EQUALS, Check.NOT_EQUALS, Check.CONTAINS, Check.MATCHES, Check.JUDGED}
@@ -43,8 +44,9 @@ def normalise(text: str) -> str:
 
 
 def check_plan(plan: TestPlan, sources: list[Source], host_ids: Iterable[str],
-               load_hosts: Iterable[str] = ()) -> list[str]:
-    """`load_hosts`: host_ids whose host notes have host_process (only those get LOAD tests)."""
+               load_hosts: Iterable[str] = (), sample_names: Iterable[str] = ()) -> list[str]:
+    """`load_hosts`: host_ids whose host notes have host_process (only those get LOAD and FUNC tests).
+    `sample_names`: the samples feature cards may name (FUNC_TESTS_PLAN.md F18)."""
     errors: list[str] = []
     texts = {s.id: normalise(s.text) for s in sources}
 
@@ -79,7 +81,7 @@ def check_plan(plan: TestPlan, sources: list[Source], host_ids: Iterable[str],
             errors.append(f"{t.id} is reserved for a built-in test added by code; don't write it")
             continue
         if not ID_PATTERN.match(t.id):
-            errors.append(f"{t.id}: id must look like ENV-001, INST-001, LOAD-001 or UNIN-001")
+            errors.append(f"{t.id}: id must look like ENV-001, INST-001, LOAD-001, FUNC-001 or UNIN-001")
         elif t.id.split("-")[0] != t.category.value:
             errors.append(f"{t.id}: id prefix doesn't match category {t.category.value}")
         if t.origin is not Origin.AGENT:
@@ -99,6 +101,7 @@ def check_plan(plan: TestPlan, sources: list[Source], host_ids: Iterable[str],
 
     load_host = host in set(load_hosts)
     _check_load(plan, load_host, errors, check_citation)
+    _check_func(plan, load_host, set(sample_names), errors, check_citation)
 
     # preconditions: known ids, no cycles
     known = set(ids) | {BUILT_IN_ENV_ID} | ({BUILT_IN_LOAD_ID} if load_host else set())
@@ -128,6 +131,10 @@ def check_plan(plan: TestPlan, sources: list[Source], host_ids: Iterable[str],
 # Names in a claim are written in quotes; an apostrophe inside a word (plug-in's) is not a quote
 QUOTED_NAME = re.compile(r"[\"“”](.{2,80}?)[\"“”]|(?<![A-Za-z])['‘’](.{2,80}?)['‘’](?![A-Za-z])")
 MAX_AGENT_LOAD_TESTS = 2  # LOAD-001: the entry point is present; LOAD-002: its documented items are reachable
+# where each check decided from the evidence may be used (window_in_ui only in the built-in LOAD-000)
+UI_CHECK_CATEGORIES = {Check.WINDOW_IN_UI: (Category.LOAD,), Check.JUDGED: (Category.LOAD, Category.FUNC),
+                       Check.OUTPUT_CREATED: (Category.FUNC,)}
+FUNC_CHECKS = {Check.JUDGED, Check.OUTPUT_CREATED}
 
 
 def _check_load(plan: TestPlan, load_host: bool, errors: list[str], check_citation) -> None:
@@ -146,13 +153,15 @@ def _check_load(plan: TestPlan, load_host: bool, errors: list[str], check_citati
                               "copy names exactly from a source (or leave them out and add an open question)")
     load_ids = {t.id for t in plan.testcases if t.category is Category.LOAD} | {BUILT_IN_LOAD_ID}
     load_tests = [t for t in plan.testcases if t.category is Category.LOAD and t.id not in BUILT_IN_IDS]
+    func_ids = {t.id for t in plan.testcases if t.category is Category.FUNC}
     for t in plan.testcases:
-        if t.category is not Category.LOAD:
-            for e in t.expected:
-                if e.check in UI_CHECKS:
-                    errors.append(f"{t.id}: check '{e.check.value}' is only for LOAD tests")
-        if t.category is Category.UNIN and set(t.preconditions) & load_ids:
-            errors.append(f"{t.id}: UNIN tests depend only on INST tests, never on LOAD (the uninstall is always tested)")
+        for e in t.expected:
+            if e.check in UI_CHECKS and t.category not in UI_CHECK_CATEGORIES[e.check]:
+                allowed = " and ".join(c.value for c in UI_CHECK_CATEGORIES[e.check])
+                errors.append(f"{t.id}: check '{e.check.value}' is only for {allowed} tests")
+        if t.category is Category.UNIN and set(t.preconditions) & (load_ids | func_ids):
+            errors.append(f"{t.id}: UNIN tests depend only on INST tests, never on LOAD or FUNC (the uninstall is "
+                          "always tested)")
     visible = ep is not None and ep.kind in VISIBLE_ENTRY_POINTS
     if not load_tests:
         if load_host and visible:
@@ -192,6 +201,83 @@ def _check_load(plan: TestPlan, load_host: bool, errors: list[str], check_citati
             if normalise(name) not in support:
                 errors.append(f"{t.id}: the claim names {name!r}, which is in none of its quotes (the test's source "
                               "or summary.entry_point.sources); copy names exactly from a source")
+
+
+def _check_func(plan: TestPlan, load_host: bool, sample_names: set[str], errors: list[str], check_citation) -> None:
+    """FUNC rules (FUNC_TESTS_PLAN.md F1, F8, F13, F14, F16, §4.1): one feature card per documented feature; one
+    FUNC test per testable card, with one `judged` claim per documented result; the tests in class order."""
+    func_tests = [t for t in plan.testcases if t.category is Category.FUNC]
+    func_ids = {t.id for t in func_tests}
+    cards = plan.summary.features
+    for i, card in enumerate(cards):
+        where = f"summary.features[{i}] ({card.name!r})"
+        for j, c in enumerate(card.results):
+            check_citation(f"{where}.results[{j}]", c)
+        for j, c in enumerate(card.sources):
+            check_citation(f"{where}.sources[{j}]", c)
+        if card.sample is not None and card.sample not in sample_names:
+            known = ", ".join(sorted(sample_names)) or "none are available"
+            errors.append(f"{where}: sample {card.sample!r} is not in the samples listing ({known}); use a listed "
+                          "name or null")
+        if card.testable:
+            if card.action_class > 2:
+                errors.append(f"{where}: a feature that needs class 3 (lasting) actions is not testable; set testable "
+                              "false with the reason")
+            if not card.results:
+                errors.append(f"{where}: a testable feature needs its documented results (cited statements)")
+            if card.test_id not in func_ids:
+                errors.append(f"{where}: test_id must name the FUNC test that runs this feature (found "
+                              f"{card.test_id!r})")
+        else:
+            if not card.reason:
+                errors.append(f"{where}: not testable, so 'reason' must say which point fails and why")
+            if card.test_id is not None:
+                errors.append(f"{where}: not testable, so test_id must be null and no FUNC test is written")
+    if func_tests and not load_host:
+        errors.append(f"{func_tests[0].id}: this host has no FUNC support (host notes without host_process); "
+                      "write no FUNC tests and add an open question")
+        return
+    card_of = {c.test_id: c for c in cards if c.testable and c.test_id}
+    previous_group = 0
+    for t in func_tests:
+        card = card_of.get(t.id)
+        if card is None:
+            errors.append(f"{t.id}: no testable feature card in summary.features names this test in its test_id")
+            continue
+        if sum(c.test_id == t.id for c in cards) > 1:
+            errors.append(f"{t.id}: named by more than one feature card; write one FUNC test per feature")
+        if BUILT_IN_LOAD_ID not in t.preconditions or any(p != BUILT_IN_LOAD_ID and p not in func_ids
+                                                          for p in t.preconditions):
+            errors.append(f"{t.id}: preconditions must be ['{BUILT_IN_LOAD_ID}'], plus other FUNC tests only when a "
+                          "cited statement says this feature needs their result")
+        for e in t.expected:
+            if e.check not in FUNC_CHECKS:
+                errors.append(f"{t.id}: a FUNC test uses only 'judged' claims and 'output_created' (found "
+                              f"'{e.check.value}')")
+        judged = [e for e in t.expected if e.check is Check.JUDGED]
+        if len(judged) != len(card.results):
+            errors.append(f"{t.id}: write one 'judged' claim per documented result of its feature card "
+                          f"({len(card.results)} results, {len(judged)} claims)")
+        support = " ".join(normalise(c.quote) for c in [*([t.source] if t.source else []), *card.results,
+                                                         *card.sources])
+        for e in judged:
+            for m in QUOTED_NAME.finditer(str(e.value or "")):
+                name = m.group(1) or m.group(2)
+                if normalise(name) not in support:
+                    errors.append(f"{t.id}: the claim names {name!r}, which is in none of its quotes (the test's "
+                                  "source or its feature card); copy names exactly from a source")
+        group = 0 if card.action_class <= 1 else 1  # F13: class 0-1 first, then class 2; else the documents' order
+        if group < previous_group:
+            errors.append(f"{t.id}: FUNC tests run in class order (class 0-1 first, then class 2); move this "
+                          "test before the tests that need class 2")
+        previous_group = max(previous_group, group)
+
+
+def sample_card(plan: TestPlan) -> FeatureCard | None:
+    """The feature card whose sample the host session opens in LOAD-000 (FUNC_TESTS_PLAN.md Q14): the first FUNC
+    test, in plan order, whose testable card names a sample; None if no FUNC test needs one."""
+    cards = {c.test_id: c for c in plan.summary.features if c.testable and c.test_id and c.sample}
+    return next((cards[t.id] for t in plan.testcases if t.category is Category.FUNC and t.id in cards), None)
 
 
 def _check_expectations(t: TestCase, errors: list[str]) -> None:

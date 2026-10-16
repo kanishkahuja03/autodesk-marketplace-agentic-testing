@@ -90,3 +90,48 @@ def test_judge_works_after_an_agent_ran_in_a_closed_event_loop(tmp_path, monkeyp
     j = judge.make_judge(plan, tmp_path, settings, host_process("autocad-plant3d").main_window)
     assert j(t, t.expected[0], obs) == answer and j(t, t.expected[0], obs) == answer
     assert models[0] is not models[1] and models[0]._client is not models[1]._client  # a new client per call
+
+
+def test_func_claims_get_the_feature_cards_quotes_and_the_output_files(tmp_path):
+    from test_selfcheck import func_plan_data
+
+    from mpagent.execute.verdict import output_dir
+
+    plan, _, obs, _shots = setup(tmp_path)
+    fplan = add_built_in_tests(TestPlan.model_validate(func_plan_data()), FACTS, host_process("autocad-plant3d"))
+    t = next(x for x in fplan.testcases if x.id == "FUNC-001")
+    out = output_dir(tmp_path, "FUNC-001")
+    out.mkdir(parents=True)
+    (out / "a.json").write_text('{"assets": ["P-101"]}', encoding="utf-8")
+    (out / "b.bin").write_bytes(b"\x00\x01\x02binary")
+    text, _ = judge.build_request(fplan, t, t.expected[0], obs, tmp_path, None, excerpt_chars=10)
+    assert 'D3: "export the entire drawing to a JSON file"' in text  # the feature card's results
+    assert 'D2: "you will receive' not in text  # not the entry point's quotes
+    assert "-- evidence/FUNC-001/a.json (21 bytes, cut off: only the first 10 characters are shown)" in text
+    assert '{"assets":' in text and "P-101" not in text
+    assert "-- evidence/FUNC-001/b.bin (9 bytes, not shown: the excerpt limit is used up)" in text
+    assert "-- evidence/FUNC-001/b.bin (binary file, 9 bytes, not shown)" in judge.file_excerpts(tmp_path, "FUNC-001")
+    load_text, _ = judge.build_request(plan, next(x for x in plan.testcases if x.id == "LOAD-001"),
+                                       plan.testcases[4].expected[0], obs, tmp_path, None)
+    assert "<output_files" not in load_text
+
+
+def test_read_text_decodes_without_a_format_list(tmp_path):
+    (tmp_path / "u16.txt").write_bytes("héllo".encode("utf-16"))
+    (tmp_path / "u8.txt").write_bytes("héllo wörld".encode())
+    assert judge.read_text(tmp_path / "u16.txt", 100) == ("héllo", True)
+    assert judge.read_text(tmp_path / "u8.txt", 3) == ("hél", False)
+    (tmp_path / "bin").write_bytes(bytes(range(256)))
+    assert judge.read_text(tmp_path / "bin", 100) is None
+
+
+def test_load000_on_a_sample_is_judged_with_the_feature_cards_context_quotes(tmp_path):
+    from test_selfcheck import func_plan_data
+
+    _plan, _, obs, _shots = setup(tmp_path)
+    fplan = add_built_in_tests(TestPlan.model_validate(func_plan_data()), FACTS, host_process("autocad-plant3d"))
+    t = next(x for x in fplan.testcases if x.id == "LOAD-000")
+    claim = next(e for e in t.expected if e.check.value == "judged")
+    text, _ = judge.build_request(fplan, t, claim, obs, tmp_path, None)
+    assert "CLAIM TO JUDGE: The host shows a document of the sample 'SampleProject' open" in text
+    assert 'D3: "must be in a P&ID project"' in text and "<output_files" not in text

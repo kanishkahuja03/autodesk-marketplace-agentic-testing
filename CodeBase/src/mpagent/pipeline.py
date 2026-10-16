@@ -16,6 +16,7 @@ from mpagent.config import ConfigError, Settings, load_settings
 from mpagent.design.agent1 import Agent1Error, AskFn, design_tests, openai_ask
 from mpagent.design.intake import IntakeError, run_intake
 from mpagent.design.msi import MsiError
+from mpagent.design.samples import list_samples
 from mpagent.design.static_read import StaticReadError, run_static_read
 from mpagent.execute.agent2 import Agent2Error, run_agent2
 from mpagent.execute.cleanup import cleanup
@@ -240,7 +241,9 @@ def _design_side(input_dir: Path, runs_dir: Path, settings: Settings, agent1_ask
     log.info("Agent 1 test design: start")
     try:
         ask = agent1_ask or openai_ask(settings)
-        plan = design_tests(run_dir, manifest, facts, ask)
+        samples = list_samples(settings.samples_dir)
+        log.info("  samples: %s", ", ".join(s.name for s in samples) or "none (SAMPLES_DIR not set or empty)")
+        plan = design_tests(run_dir, manifest, facts, ask, samples)
     except ConfigError as e:
         raise PipelineStopped(f"Agent 1 can't start: {e}") from e
     except Agent1Error as e:

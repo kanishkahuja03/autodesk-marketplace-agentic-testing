@@ -129,3 +129,47 @@ def test_load000_is_added_for_hosts_with_host_process(facts):
     assert "load_prompt_seen" in load000.observe  # reported, not checked
     no_host = add_built_in_tests(TestPlan.model_validate(good_plan_data()), facts)
     assert "LOAD-000" not in [t.id for t in no_host.testcases]
+
+
+def test_func_tests_run_between_load_and_unin_in_agent1s_order(facts):
+    from plans import _test, load_plan_data
+
+    from mpagent.hostnotes import host_process
+
+    data = load_plan_data()
+    func = [_test(tid, "FUNC", "export", ["LOAD-000"], ["Run the feature"], ["what_happened"],
+                  [{"key": "what_happened", "check": "judged", "value": "a file is written", "values": None}])
+            for tid in ("FUNC-002", "FUNC-001")]  # Agent 1's order (F13) is kept, not the ID order
+    data["testcases"] = func + data["testcases"]
+    plan = add_built_in_tests(TestPlan.model_validate(data), facts, host_process("autocad-plant3d"))
+    assert [t.id for t in plan.testcases] == ["ENV-000", "INST-001", "INST-002", "LOAD-000", "LOAD-001", "FUNC-002",
+                                              "FUNC-001", "UNIN-000", "UNIN-001"]
+
+
+def test_samples_listing_is_in_agent1s_input_and_features_in_understanding(run_dir, manifest, facts):
+    from mpagent.design.samples import Sample
+
+    data = copy.deepcopy(good_plan_data())
+    data["summary"]["features"] = [{
+        "name": "Export", "how_started": "a button", "context": None, "sample": None, "results": [], "sources": [],
+        "action_class": 3, "testable": False, "reason": "point 2: it changes settings", "test_id": None}]
+    ask = fake_ask(data)
+    design_tests(run_dir, manifest, facts, ask, [Sample("MyProject", run_dir, [("a.dat", 5)], 1, 5)])
+    assert '<sample name="MyProject" kind="folder" files="1" bytes="5">' in ask.calls[0]
+    understanding = (run_dir / "understanding.md").read_text(encoding="utf-8")
+    assert "## Features (1)" in understanding and "not testable: point 2: it changes settings" in understanding
+
+
+def test_load000_opens_the_sample_when_a_func_test_needs_one(facts):
+    from test_selfcheck import func_plan_data
+
+    from mpagent.hostnotes import host_process
+
+    hp = host_process("autocad-plant3d")
+    plan = add_built_in_tests(TestPlan.model_validate(func_plan_data()), facts, hp)
+    load000 = next(t for t in plan.testcases if t.id == "LOAD-000")
+    assert "SampleProject" in load000.title and any("copy of the sample 'SampleProject'" in s for s in load000.steps)
+    checks = {e.key: (e.check.value, e.value) for e in load000.expected}
+    assert checks["host_started"] == ("window_in_ui", hp.main_window)
+    assert checks["document_opened"][0] == "judged" and "in a P&ID project" in checks["document_opened"][1]
+    assert checks["error_dialog_seen"] == ("not_exists", None)

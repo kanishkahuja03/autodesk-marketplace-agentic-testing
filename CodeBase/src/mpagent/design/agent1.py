@@ -15,17 +15,20 @@ from ruamel.yaml import YAML
 
 from mpagent.config import PROJECT_ROOT, Settings
 from mpagent.design.evidence import Source, build_sources, render_pack
+from mpagent.design.samples import Sample, render_samples
 from mpagent.design.selfcheck import (
     BUILT_IN_ENV_ID,
     BUILT_IN_LOAD_ID,
     BUILT_IN_UNIN_ID,
     check_plan,
+    sample_card,
 )
 from mpagent.hostnotes import host_process
 from mpagent.models import (
     Category,
     Check,
     Expectation,
+    FeatureCard,
     HostProcess,
     InstallerFacts,
     IntakeManifest,
@@ -72,13 +75,15 @@ def openai_ask(settings: Settings) -> AskFn:
     return ask
 
 
-def design_tests(run_dir: Path, manifest: IntakeManifest, facts: InstallerFacts, ask: AskFn) -> TestPlan:
-    """Run Agent 1 with self-check retries, add ENV-000 and write the outputs. Returns the final plan."""
+def design_tests(run_dir: Path, manifest: IntakeManifest, facts: InstallerFacts, ask: AskFn,
+                 samples: list[Sample] = ()) -> TestPlan:
+    """Run Agent 1 with self-check retries, add ENV-000 and write the outputs. Returns the final plan.
+    `samples`: the samples folder's listing (FUNC_TESTS_PLAN.md F18); feature cards may name these."""
     trace = Trace(run_dir)
     sources = build_sources(run_dir, manifest, facts)
     host_ids = host_catalogue().keys()
     load_hosts = [h for h in host_ids if host_process(h)]
-    conversation: str | list = render_pack(sources)
+    conversation: str | list = render_pack(sources) + "\n\n" + render_samples(list(samples))
 
     plan: TestPlan | None = None
     errors: list[str] = []
@@ -91,7 +96,7 @@ def design_tests(run_dir: Path, manifest: IntakeManifest, facts: InstallerFacts,
             raise Agent1Error(f"LLM call failed: {type(e).__name__}: {e}") from e
         trace.write("agent1_response", attempt=attempt, plan=plan.model_dump(mode="json"))
 
-        errors = check_plan(plan, sources, host_ids, load_hosts)
+        errors = check_plan(plan, sources, host_ids, load_hosts, [s.name for s in samples])
         trace.write("agent1_selfcheck", attempt=attempt, errors=errors)
         if not errors:
             log.info("Agent 1 attempt %d: self-check passed", attempt)
@@ -116,12 +121,13 @@ def _retry_message(errors: list[str]) -> str:
     return f"The self-check found these errors in your test plan:\n{lines}\n\nReturn a corrected, complete TestPlan."
 
 
-CATEGORY_ORDER = [Category.ENV, Category.INST, Category.LOAD, Category.UNIN]  # the order Agent 2 runs them
+# the order Agent 2 runs them; the sort is stable, so FUNC tests keep Agent 1's order (FUNC_TESTS_PLAN.md F13)
+CATEGORY_ORDER = [Category.ENV, Category.INST, Category.LOAD, Category.FUNC, Category.UNIN]
 
 
 def add_built_in_tests(plan: TestPlan, facts: InstallerFacts, host: HostProcess | None = None) -> TestPlan:
     """Prepend ENV-000 (executed by code in the preflight, D23) and make every INST test depend on it.
-    For a host with host_process, also add LOAD-000 (executed by Agent 2, decided by code from the UI tree)."""
+    For a host with host_process, also add LOAD-000 (executed by Agent 2; on the sample when a FUNC test needs one)."""
     props = facts.properties
     product_code, product_name = props.get("ProductCode"), props.get("ProductName")
     lookup = " or ".join(x for x in (f"ProductCode {product_code}" if product_code else "",
@@ -141,7 +147,7 @@ def add_built_in_tests(plan: TestPlan, facts: InstallerFacts, host: HostProcess 
         tests.append(t)
     tests = [env000, *tests]
     if host is not None:
-        tests.append(load000(tests, host))
+        tests.append(load000(tests, host, sample_card(plan)))
     tests.append(unin000(tests))
     # built-in tests first in their category; stable, so Agent 1's order is kept otherwise
     tests.sort(key=lambda t: (CATEGORY_ORDER.index(t.category), t.origin is not Origin.BUILT_IN))
@@ -164,10 +170,32 @@ def unin000(tests: list[TestCase]) -> TestCase:
     )
 
 
-def load000(tests: list[TestCase], host: HostProcess) -> TestCase:
+def load000(tests: list[TestCase], host: HostProcess, card: FeatureCard | None = None) -> TestCase:
     """LOAD-000 "host ready with a new document" (LOAD_TESTS_PLAN.md L2, L11, L16). Same for every app
-    on a host: its regexes come from the host notes. Depends on the INST test(s) observing install_exit_code."""
+    on a host: its regexes come from the host notes. Depends on the INST test(s) observing install_exit_code.
+    With `card` (a FUNC test needs a sample, FUNC_TESTS_PLAN.md Q14): the host opens the copy of that sample
+    instead, and the LOAD and FUNC tests run in it. Its document's name isn't known in advance, so whether the
+    right document is open is a judged claim."""
     installs = [t.id for t in tests if t.category is Category.INST and "install_exit_code" in t.observe]
+    if card is not None:
+        kind = card.context or "a document of the sample"
+        return TestCase(
+            id=BUILT_IN_LOAD_ID, origin=Origin.BUILT_IN, category=Category.LOAD,
+            title=f"Host starts with the app installed and opens the sample '{card.sample}'", source=None,
+            preconditions=installs,
+            steps=["Start the host exactly as given in 'App under test' (host-interaction skill)",
+                   "Answer a one-time load/trust prompt for the app under test; handle other dialogs by the skill",
+                   (f"Open the copy of the sample '{card.sample}' given in your input through the host's UI, and in "
+                    f"it a document of this kind: {kind}"),
+                   "Take a Snapshot and a Screenshot of the host window, then record this test"],
+            observe=["host_started", "document_opened", "error_dialog_seen", "load_prompt_seen"],
+            expected=[Expectation(key="host_started", check=Check.WINDOW_IN_UI, value=host.main_window, values=None),
+                      Expectation(key="document_opened", check=Check.JUDGED, values=None,
+                                  value=f"The host shows a document of the sample '{card.sample}' open, of this "
+                                        f"kind: {kind}"),
+                      Expectation(key="error_dialog_seen", check=Check.NOT_EXISTS, value=None, values=None)],
+            priority=Priority.P1,
+        )
     return TestCase(
         id=BUILT_IN_LOAD_ID, origin=Origin.BUILT_IN, category=Category.LOAD,
         title="Host starts with the app installed and opens a new document", source=None, preconditions=installs,
