@@ -157,8 +157,10 @@ class ObservationRecorder:
             return (f"Not recorded: these evidence files don't exist in the run folder: {', '.join(missing)}. "
                     "Record again listing only files that exist (or none), and report only values you actually "
                     "saw in a tool result (use null otherwise).")
+        named = [e.replace("\\", "/") for e in evidence]
         obs = Observation(test_id=test_id, executed=executed, observed=observed,
-                          evidence=list(evidence) + self.recorder.take_pending(), notes=notes)
+                          evidence=list(dict.fromkeys(named + self.recorder.take_pending())), picked=named,
+                          notes=notes)
         save_observation(self.run_dir, obs)
         self.trace.write("record_observation", observation=obs.model_dump(mode="json"))
         log.info("  %s observed: %s%s", test_id, ", ".join(f"{kv.key}={kv.value!r}" for kv in observed) or "-",
@@ -180,7 +182,9 @@ def make_record_observation(observations: ObservationRecorder):
             test_id: The test's ID from the plan, e.g. INST-001.
             executed: False if you could not carry out the steps.
             observed: One {key, value} for every key in the test's `observe` list.
-            evidence: Files relative to the run folder (e.g. evidence/install.log). Screenshots are added automatically.
+            evidence: Files relative to the run folder (e.g. evidence/install.log). Screenshots are added
+                automatically; for a test judged from screenshots, also list the ones that best show its claim
+                (names as given in the Screenshot results), so the reviewer sees them first.
             notes: Short factual notes, e.g. where something was found.
         """
         return observations.record(test_id, executed, observed, evidence, notes)

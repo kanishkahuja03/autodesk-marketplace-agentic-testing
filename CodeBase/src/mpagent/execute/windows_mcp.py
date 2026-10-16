@@ -12,6 +12,7 @@ import shutil
 from pathlib import Path
 
 from agents.mcp import MCPServerStdio, create_static_tool_filter
+from mcp.types import TextContent
 
 from mpagent.config import Settings
 from mpagent.execute.ui_tree import decode
@@ -85,7 +86,8 @@ class CallRecorder:
         self.count = 0
         self.pending: list[str] = []
 
-    def record(self, tool: str, arguments: dict | None, result, cleaned_chars: int | None = None) -> None:
+    def record(self, tool: str, arguments: dict | None, result, cleaned_chars: int | None = None) -> list[str]:
+        """Save the call's evidence and trace it; returns the saved files, relative to the run folder."""
         self.count += 1
         saved = save_images(result.content, self.evidence_dir, f"{self.count:03d}_{tool}")
         text = " ".join(getattr(c, "text", "") for c in result.content if getattr(c, "type", None) == "text")
@@ -97,6 +99,7 @@ class CallRecorder:
         self.trace.write("mcp_call", n=self.count, tool=tool, arguments=arguments, is_error=is_error,
                          text=text[:TRACE_TEXT_CHARS], text_chars=len(text), sent_to_model_chars=cleaned_chars,
                          images=rel)
+        return rel
 
     def take_pending(self) -> list[str]:
         out, self.pending = self.pending, []
@@ -106,7 +109,7 @@ class CallRecorder:
         return any(p.endswith(UI_TEXT_SUFFIX) for p in self.pending)
 
     def has_pending_image(self) -> bool:
-        return any(p.lower().endswith((".png", ".jpg", ".jpeg")) for p in self.pending)
+        return any(Path(p).suffix.lower() in IMAGE_SUFFIXES for p in self.pending)
 
 
 class RecordingMCPServer(MCPServerStdio):
@@ -116,10 +119,21 @@ class RecordingMCPServer(MCPServerStdio):
         result = await super().call_tool(tool_name, arguments, meta)
         cleaned = clean_result(result)
         try:
-            self.recorder.record(tool_name, arguments, result, cleaned_chars=_text_chars(cleaned))
+            saved = self.recorder.record(tool_name, arguments, result, cleaned_chars=_text_chars(cleaned))
         except Exception as e:  # noqa: BLE001 - recording evidence must never break the tool call itself
             log.warning("could not record MCP call %s: %s: %s", tool_name, type(e).__name__, e)
-        return cleaned
+            return cleaned
+        return with_saved_names(cleaned, saved)
+
+
+def with_saved_names(result, saved: list[str]):
+    """Tell the model the file names its images were saved under, so it can name the ones that show a
+    claim in record_observation (FUNC_TESTS_PLAN.md F17)."""
+    images = [p for p in saved if Path(p).suffix.lower() in IMAGE_SUFFIXES]
+    if not images:
+        return result
+    note = TextContent(type="text", text="Saved as evidence: " + ", ".join(images))
+    return result.model_copy(update={"content": [*result.content, note]})
 
 
 # ---------------------------------------------------------------- what the model gets back
@@ -174,6 +188,7 @@ async def check_tool_list(server: MCPServerStdio) -> list[str]:
 
 SNAPSHOT_TOOL = "Snapshot"
 UI_TEXT_SUFFIX = "_ui.txt"
+IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg")
 
 
 def save_ui_text(text: str, evidence_dir: Path, prefix: str) -> Path:

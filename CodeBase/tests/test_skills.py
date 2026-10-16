@@ -63,7 +63,18 @@ def test_load_rules_are_in_the_skills():
     assert "**You decide what to do**" in host and "smallest lasting effect" in host
     assert "never choose \"Always" in host and "Document every dialog in the `notes`" in host
     assert "`timeout` at most 105" in host
-    assert "**Reveal, never act.**" in host and "Make it visible." in host  # generic exploration (L24, D65)
+    assert "**Show, never run.**" in host and "Make it visible." in host  # generic exploration (L24, D65)
+
+
+def test_action_policy_and_restart_rule_are_in_the_host_skill():
+    # one policy by lasting effect and at most one restart per test (FUNC_TESTS_PLAN.md F4, F9)
+    host = (SKILLS / "execute" / "host-interaction.md").read_text(encoding="utf-8")
+    for phrase in ("**0 View**", "**1 Session**", "**2 Reversible**", "**3 Lasting**",
+                   "treat it as class 3", "you **never run a feature**", "**Each test may use at most one restart.**",
+                   "is a normal start, not a restart"):
+        assert phrase in host, phrase
+    evidence = (SKILLS / "execute" / "evidence.md").read_text(encoding="utf-8")
+    assert "Saved as evidence:" in evidence and "the reviewer sees those first" in evidence
 
 
 def test_skills_hold_no_host_or_app_specific_knowledge():

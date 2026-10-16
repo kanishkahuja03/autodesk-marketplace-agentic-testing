@@ -10,7 +10,7 @@ Call `record_observation` **right after you finish each test**, before starting 
 - `test_id`: the test's ID from the plan.
 - `executed`: `true` if you carried out the steps; `false` if you couldn't (and say why in `notes`).
 - `observed`: one `{key, value}` for **every key in that test's `observe` list**, using exactly those key names. Values are raw facts: numbers as numbers (`0`), yes/no as `true`/`false`, text as found. If you couldn't get a value, use `null` and explain in `notes`.
-- `evidence`: paths **relative to the run folder** of files that back the values (e.g. `evidence/install.log`). Screenshots and Snapshots you take are saved and attached by the system automatically; you don't need to list them.
+- `evidence`: paths **relative to the run folder** of files that back the values (e.g. `evidence/install.log`). Screenshots and Snapshots you take are saved and attached by the system automatically. Each `Screenshot` result tells you the file name it was saved under ("Saved as evidence: …"). For a test that a reviewer judges from screenshots, **also list the screenshots that best show what its claim is about**, names exactly as given; the reviewer sees those first.
 - `notes`: short and factual, e.g. "found under HKLM WOW6432Node", "Uninstall button was disabled".
 
 Run **every** test in the plan, in order (ENV → INST → LOAD → UNIN), even if an earlier test looked wrong (for LOAD after a failed install, see the host-interaction skill). Code applies the preconditions afterwards. ENV-000 has already been checked by code; don't repeat it. UNIN-000 ("nothing left behind") is checked by code after you finish; don't record it.

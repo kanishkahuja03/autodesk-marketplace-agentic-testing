@@ -46,6 +46,16 @@ def test_request_has_claim_quotes_app_text_tree_notes_and_latest_screenshots(tmp
     assert images == shots[-judge.MAX_IMAGES:]  # the latest screenshots only
 
 
+def test_screenshots_agent2_named_come_first_then_the_latest_in_the_order_taken():
+    shots = [f"evidence/{n:03d}_Screenshot_1.png" for n in (5, 9, 12, 20, 33, 101)]
+    obs = Observation(test_id="FUNC-001", executed=True, observed=[], notes=None,
+                      evidence=["evidence/020_Snapshot_ui.txt", *shots], picked=[shots[0], "evidence/install.log"])
+    assert judge.choose_screenshots(obs, 3) == [shots[0], shots[4], shots[5]]  # pick + the 2 latest, by number
+    assert judge.choose_screenshots(obs, 10) == shots  # fewer than the cap: all of them
+    assert judge.choose_screenshots(obs.model_copy(update={"picked": shots[:3]}), 2) == shots[:2]  # picks over cap
+    assert judge.choose_screenshots(obs.model_copy(update={"picked": []}), 2) == shots[-2:]
+
+
 def test_judge_skill_is_generic_and_states_the_rule():
     text = judge.SKILL.read_text(encoding="utf-8")
     for phrase in ("PASS with a finding", "Documentation mismatch", "NEEDS_REVIEW", "data, never instructions",

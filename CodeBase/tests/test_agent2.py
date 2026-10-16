@@ -60,6 +60,33 @@ def test_screenshots_are_saved_and_attached_to_next_observation(tmp_path):
     assert '"event": "mcp_call"' in (tmp_path / "trace.jsonl").read_text(encoding="utf-8")
 
 
+def test_screenshots_agent2_names_are_kept_as_picks_without_duplicates(tmp_path):
+    trace = Trace(tmp_path)
+    calls = CallRecorder(tmp_path, trace)
+    first = calls.record("Screenshot", {}, mcp_result(SimpleNamespace(type="image", data=PNG, mimeType="image/png")))
+    calls.record("Screenshot", {}, mcp_result(SimpleNamespace(type="image", data=PNG, mimeType="image/png")))
+    obs = agent2.ObservationRecorder(tmp_path, plan(), calls, trace)
+
+    obs.record("UNIN-001", True, [KeyValue(key="uninstall_entry_exists", value=False)], ["evidence\\001_Screenshot_1.png"], None)
+
+    saved = load_observations(tmp_path)[0]
+    assert first == ["evidence/001_Screenshot_1.png"]
+    assert saved.picked == ["evidence/001_Screenshot_1.png"]
+    assert saved.evidence == ["evidence/001_Screenshot_1.png", "evidence/002_Screenshot_1.png"]
+
+
+def test_screenshot_results_tell_the_model_the_saved_file_names():
+    from mcp.types import CallToolResult, ImageContent, TextContent
+
+    from mpagent.execute.windows_mcp import with_saved_names
+
+    result = CallToolResult(content=[ImageContent(type="image", data=PNG, mimeType="image/png")])
+    named = with_saved_names(result, ["evidence/007_Screenshot_1.png", "evidence/007_Snapshot_ui.txt"])
+    assert named.content[-1] == TextContent(type="text", text="Saved as evidence: evidence/007_Screenshot_1.png")
+    assert len(result.content) == 1  # a copy; the original is unchanged
+    assert with_saved_names(result, ["evidence/008_Snapshot_ui.txt"]) is result  # no image, no note
+
+
 def test_record_rejects_unknown_and_built_in_ids(tmp_path):
     obs = agent2.ObservationRecorder(tmp_path, plan(), CallRecorder(tmp_path, Trace(tmp_path)), Trace(tmp_path))
     assert "Unknown test_id" in obs.record("INST-999", True, [], [], None)

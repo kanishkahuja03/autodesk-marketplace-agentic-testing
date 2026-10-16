@@ -26,7 +26,7 @@ from mpagent.models import (
 from mpagent.runlog import Trace, log
 
 SKILL = PROJECT_ROOT / "skills" / "execute" / "judge.md"
-MAX_IMAGES = 4  # the latest screenshots of the test: the states Agent 2 explored last
+MAX_IMAGES = 6  # default cap per claim; JUDGE_MAX_IMAGES in .env (FUNC_TESTS_PLAN.md F17)
 MAX_UI_TEXT_CHARS = 15_000
 MAX_TREE_CHARS = 8_000
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
@@ -57,13 +57,30 @@ def host_tree_text(run_dir: Path, obs: Observation, main_window: str | None) -> 
     return "\n".join(lines)[:MAX_TREE_CHARS]
 
 
+def choose_screenshots(obs: Observation, max_images: int = MAX_IMAGES) -> list[str]:
+    """The screenshots Agent 2 named itself first, then the latest ones, up to max_images; shown in the
+    order taken (FUNC_TESTS_PLAN.md F17)."""
+    images = [r for r in obs.evidence if Path(r).suffix.lower() in IMAGE_TYPES]
+    picked = [r for r in images if r in obs.picked][:max_images]
+    rest = [r for r in images if r not in picked]
+    room = max_images - len(picked)
+    chosen = set(picked + (rest[-room:] if room > 0 else []))
+    return sorted(chosen, key=_taken_order)
+
+
+def _taken_order(rel: str) -> tuple[int, str]:
+    """Saved files start with the call number (e.g. evidence/012_Screenshot_1.png)."""
+    number = Path(rel).name.split("_", 1)[0]
+    return (int(number) if number.isdigit() else -1, rel)
+
+
 def build_request(plan: TestPlan, t: TestCase, e: Expectation, obs: Observation, run_dir: Path,
-                  main_window: str | None) -> tuple[str, list[str]]:
+                  main_window: str | None, max_images: int = MAX_IMAGES) -> tuple[str, list[str]]:
     """The text part of the judge's input and the screenshots to show it (paths relative to the run folder)."""
     quotes = [t.source] if t.source else []
     if plan.summary.entry_point:
         quotes += plan.summary.entry_point.sources
-    shots = [r for r in obs.evidence if Path(r).suffix.lower() in IMAGE_TYPES][-MAX_IMAGES:]
+    shots = choose_screenshots(obs, max_images)
     observed = ", ".join(f"{kv.key}={kv.value!r}" for kv in obs.observed) or "-"
     parts = [
         f"Test {t.id}: {t.title}",
@@ -95,7 +112,7 @@ def make_judge(plan: TestPlan, run_dir: Path, settings: Settings, main_window: s
         return result.final_output
 
     def judge(t: TestCase, e: Expectation, obs: Observation) -> Judgement:
-        text, shots = build_request(plan, t, e, obs, run_dir, main_window)
+        text, shots = build_request(plan, t, e, obs, run_dir, main_window, settings.judge_max_images)
         content: list[dict] = [{"type": "input_text", "text": text}]
         for rel in shots:
             data = base64.b64encode((run_dir / rel).read_bytes()).decode()

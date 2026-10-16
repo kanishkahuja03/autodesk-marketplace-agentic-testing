@@ -330,6 +330,9 @@ class Observation(BaseModel):
     executed: bool = Field(description="False if Agent 2 could not carry out the steps")
     observed: list[KeyValue] = Field(description="One entry per key in the test's `observe` list")
     evidence: list[str] = Field(description="Paths relative to the run folder, e.g. 'evidence/INST-001_install.log'")
+    picked: list[str] = Field(default_factory=list,
+                              description="Set by code: the evidence files Agent 2 named itself (the judge sees these "
+                                          "screenshots first)")
     notes: str | None
     findings: list[str] = Field(default_factory=list, description="Set by code only, e.g. leftovers (UNIN-000)")
 

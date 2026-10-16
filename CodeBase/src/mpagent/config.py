@@ -26,6 +26,7 @@ class Settings:
     agent2_timeout_min: int
     windows_mcp_command: str
     runs_dir: Path
+    judge_max_images: int = 6  # screenshots per judged claim (FUNC_TESTS_PLAN.md F17)
     # TEMPORARY (until the OpenAI key arrives): Gemini through Google's OpenAI-compatible endpoint.
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-flash-lite-latest"
@@ -95,6 +96,7 @@ def load_settings() -> Settings:
         agent2_timeout_min=_int("AGENT2_TIMEOUT_MIN", 40),
         windows_mcp_command=os.environ.get("WINDOWS_MCP_COMMAND") or "windows-mcp",
         runs_dir=PROJECT_ROOT / "runs",
+        judge_max_images=_int("JUDGE_MAX_IMAGES", 6),
         gemini_api_key=os.environ.get("GEMINI_API_KEY") or None,
         gemini_model=os.environ.get("GEMINI_MODEL") or "gemini-flash-lite-latest",
     )
