@@ -33,7 +33,7 @@ MAX_IMAGES = 6  # default cap per claim; JUDGE_MAX_IMAGES in .env (FUNC_TESTS_PL
 MAX_UI_TEXT_CHARS = 15_000
 MAX_TREE_CHARS = 8_000
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
-FILE_EXCERPT_CHARS = 15_000  # default for all output files of one claim; JUDGE_FILE_EXCERPT_CHARS in .env (F17)
+FILE_EXCERPT_CHARS: int | None = None  # no limit by default; JUDGE_FILE_EXCERPT_CHARS in .env sets one (F17)
 CONTROL_CHARS = {chr(c) for c in range(32)} - {"\t", "\n", "\r", "\f"}  # a text file has none of these
 
 
@@ -79,13 +79,14 @@ def _taken_order(rel: str) -> tuple[int, str]:
     return (int(number) if number.isdigit() else -1, rel)
 
 
-def read_text(path: Path, max_chars: int) -> tuple[str, bool] | None:
-    """The start of a file as text (at most max_chars characters) and whether that is the whole file, or None
-    if it doesn't decode as text. No list of file formats: a file is text if it decodes as UTF-8 (or UTF-16
-    with a byte order mark) and has no control characters."""
+def read_text(path: Path, max_chars: int | None) -> tuple[str, bool] | None:
+    """The start of a file as text (at most max_chars characters; None: the whole file) and whether that is the
+    whole file, or None if it doesn't decode as text. No list of file formats: a file is text if it decodes as
+    UTF-8 (or UTF-16 with a byte order mark) and has no control characters."""
     size = path.stat().st_size
     with path.open("rb") as f:
-        data = f.read(max_chars * 4 + 4)  # enough bytes for max_chars characters in any of these encodings
+        # enough bytes for max_chars characters in any of these encodings
+        data = f.read() if max_chars is None else f.read(max_chars * 4 + 4)
     encoding = "utf-16" if data[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig"
     try:
         text = data.decode(encoding)
@@ -95,17 +96,19 @@ def read_text(path: Path, max_chars: int) -> tuple[str, bool] | None:
         text = data[: e.start].decode(encoding)
     if CONTROL_CHARS & set(text):
         return None
+    if max_chars is None:
+        return text, len(data) == size
     return text[:max_chars], len(data) == size and len(text) <= max_chars
 
 
-def file_excerpts(run_dir: Path, test_id: str, max_chars: int = FILE_EXCERPT_CHARS) -> str:
+def file_excerpts(run_dir: Path, test_id: str, max_chars: int | None = FILE_EXCERPT_CHARS) -> str:
     """The start of every file the test produced, all within one cap (FUNC_TESTS_PLAN.md F17). Says when a
     file is cut off or not shown, so the judge knows what it didn't see."""
     blocks: list[str] = []
     left = max_chars
     for rel in output_files(run_dir, test_id):
         size = (run_dir / rel).stat().st_size
-        if left <= 0:
+        if left is not None and left <= 0:
             blocks.append(f"-- {rel} ({size:,} bytes, not shown: the excerpt limit is used up)")
             continue
         read = read_text(run_dir / rel, left)
@@ -115,7 +118,8 @@ def file_excerpts(run_dir: Path, test_id: str, max_chars: int = FILE_EXCERPT_CHA
         text, whole = read
         note = "" if whole else f", cut off: only the first {len(text):,} characters are shown"
         blocks.append(f"-- {rel} ({size:,} bytes{note})\n{text}")
-        left -= len(text)
+        if left is not None:
+            left -= len(text)
     return "\n".join(blocks)
 
 
@@ -137,7 +141,7 @@ def claim_quotes(plan: TestPlan, t: TestCase) -> list:
 
 def build_request(plan: TestPlan, t: TestCase, e: Expectation, obs: Observation, run_dir: Path,
                   main_window: str | None, max_images: int = MAX_IMAGES,
-                  excerpt_chars: int = FILE_EXCERPT_CHARS) -> tuple[str, list[str]]:
+                  excerpt_chars: int | None = FILE_EXCERPT_CHARS) -> tuple[str, list[str]]:
     """The text part of the judge's input and the screenshots to show it (paths relative to the run folder)."""
     quotes = claim_quotes(plan, t)
     shots = choose_screenshots(obs, max_images)

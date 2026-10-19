@@ -18,6 +18,7 @@ host_process:
   main_window: '^(Autodesk )?AutoCAD Plant 3D \d{4}'
   new_document: 'Drawing\d+(\.dwg)?'
 navigation: navigation/plant3d-navigation.md  # host-only navigation guidance for Agent 2
+navigation_steps: navigation/plant3d-navigation-steps.md  # the same, as steps for the find-by-name UI tools
 ---
 
 # Host: AutoCAD Plant 3D (`host_id: autocad-plant3d`)

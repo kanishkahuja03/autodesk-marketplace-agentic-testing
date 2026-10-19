@@ -30,7 +30,7 @@ The goal **now** is a **demo POC with minimal development effort**, built from r
 | D2 | LLM | **Enterprise OpenAI API** (platform.openai.com). Model name set in `.env`. Gemini removed. |
 | D3 | Agent framework | **OpenAI Agents SDK** (`openai-agents`, Python) |
 | D4 | Agent 1 | **Blind, single pass.** No tools, no machine access. Output: `understanding.md` + `testcases.yaml`. |
-| D5 | Agent 2 | **One agent session for the whole plan**, driving the machine **only through Windows-MCP**. No action catalogue of our own. The single local exception is the reporting tool `record_observation` (D30). |
+| D5 | Agent 2 | **One agent session for the whole plan**, driving the machine **only through Windows-MCP**. No action catalogue of our own. The local exceptions are the reporting tool `record_observation` (D30) and, since 2026-10-19, the find-by-name UI tools `find_ui` / `click_ui` / `type_ui` in the host's windows (ADR-047, `UI_FIND_TOOLS_PLAN.md`; Windows-MCP stays the fallback). |
 | D6 | UI interaction | **[Windows-MCP](https://github.com/CursorTouch/Windows-MCP)** (reads the accessibility tree, then clicks, types and takes screenshots) |
 | D7 | Verdict | **Code** decides every **fact** (exit codes, registry, files, LOAD-000's host window and new document). **Claims about what the UI shows** are decided by an evidence-bound **LLM judge** (D58, 2026-10-14); Agent 2 never sets a status. |
 | D8 | Demo test levels | **ENV, INST, LOAD, UNIN** (LOAD added in v2.3, D40–D52; FUNC later) |

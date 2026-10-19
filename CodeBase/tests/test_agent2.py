@@ -300,3 +300,23 @@ def test_load000_gets_the_sample_copy_and_func_tests_reuse_it(tmp_path):
     assert "the copy of the sample 'SampleProject' that LOAD-000 opened" in block
     missing = func_block(prepare_func_tests(func_plan(), tmp_path / "run2", None), "SampleProject")
     assert "record LOAD-000 with executed: false" in missing
+
+
+def test_ui_find_tools_add_their_skill_only_when_switched_on():
+    # UI_FIND_TOOLS_PLAN.md: with the switch off, Agent 2's instructions are exactly as before
+    before = agent2.instructions("autocad-plant3d", with_host_interaction=True)
+    assert agent2.instructions("autocad-plant3d", with_host_interaction=True, with_ui_find=False) == before
+    assert "find_ui" not in before and "Steps with the name tools" not in before
+    on = agent2.instructions("autocad-plant3d", with_host_interaction=True, with_ui_find=True)
+    assert on.startswith(before.split("\n\n")[0]) and "# Finding UI elements by name" in on
+    assert "# AutoCAD Plant 3D: steps with the name tools" in on
+    assert "# Finding UI elements by name" not in agent2.instructions("autocad-plant3d", with_ui_find=True)  # no host
+
+
+def test_ui_find_switch_is_on_by_default_and_can_be_turned_off(monkeypatch):
+    monkeypatch.delenv("AGENT2_UI_FIND_TOOLS", raising=False)
+    assert load_settings().agent2_ui_find_tools in (True, False)  # .env may set it
+    monkeypatch.setenv("AGENT2_UI_FIND_TOOLS", "false")
+    assert load_settings().agent2_ui_find_tools is False
+    monkeypatch.setenv("AGENT2_UI_FIND_TOOLS", "true")
+    assert load_settings().agent2_ui_find_tools is True

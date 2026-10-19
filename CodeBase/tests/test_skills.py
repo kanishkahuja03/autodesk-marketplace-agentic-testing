@@ -12,11 +12,12 @@ SKILLS = Path(__file__).parent.parent / "skills"
 SRC = Path(__file__).parent.parent / "src" / "mpagent"
 EXPECTED = ["test-design/SKILL.md", "hosts/autocad-plant3d.md", "hosts/none.md",
             "execute/windows-installer.md", "execute/evidence.md", "execute/host-interaction.md",
-            "execute/judge.md"]
+            "execute/judge.md", "execute/ui-find.md"]
 # Generic parts must not name a product (LOAD_TESTS_PLAN.md, rule kept from D1)
 PRODUCT_NAMES = re.compile(r"plant ?3d|autocad|acad|p&id", re.IGNORECASE)
 GENERIC_FILES = [SKILLS / "execute" / "host-interaction.md", SRC / "hostnotes.py", SRC / "execute" / "host.py",
                  SRC / "execute" / "context.py", SRC / "design" / "samples.py",
+                 SKILLS / "execute" / "ui-find.md", SRC / "execute" / "ui_find.py",
                  SRC / "execute" / "ui_tree.py", SRC / "execute" / "verdict.py",
                  SKILLS / "execute" / "judge.md", SRC / "execute" / "judge.py", SRC / "design" / "ui_text.py"]
 
@@ -148,3 +149,13 @@ def test_waitfor_only_for_the_main_window_dialogs_by_snapshot():
     for phrase in ("**Use `WaitFor` only for the host's main window after starting it.**",
                    "**`Snapshot` without vision**", "**at most three times**", "**Never repeat the action while you wait**"):
         assert phrase in host, phrase
+
+
+def test_navigation_steps_are_named_by_the_host_profile():
+    # UI_FIND_TOOLS_PLAN.md: the step sequences for the name tools are host data, loaded like the navigation file
+    from mpagent.hostnotes import host_navigation
+
+    steps = host_navigation("autocad-plant3d", SKILLS / "hosts", "navigation_steps")
+    assert steps and 'click_ui("P&ID Drawings", control_type="TreeItem", double=True)' in steps
+    assert 'type_ui("File name:"' in steps and "Screenshot only" in steps
+    assert host_navigation("none", SKILLS / "hosts", "navigation_steps") is None

@@ -27,9 +27,10 @@ class Settings:
     windows_mcp_command: str
     runs_dir: Path
     judge_max_images: int = 6  # screenshots per judged claim (FUNC_TESTS_PLAN.md F17)
-    judge_file_excerpt_chars: int = 15_000  # all output-file excerpts of one claim together (F17)
+    judge_file_excerpt_chars: int | None = None  # all output files of one claim together; None: no limit (F17)
     agent2_func_min_per_test: int = 10  # time allowance per FUNC test, added to agent2_timeout_min (F15)
     agent2_func_turns_per_test: int = 40  # turn allowance per FUNC test, added to agent2_max_turns (F15)
+    agent2_ui_find_tools: bool = True  # find/click/type UI elements by name, Windows-MCP as fallback (UI_FIND_TOOLS_PLAN.md)
     samples_dir: Path | None = None  # TEMPORARY (POC): the one sample, a file or a folder (F18, Q14)
     # TEMPORARY (until the OpenAI key arrives): Gemini through Google's OpenAI-compatible endpoint.
     gemini_api_key: str | None = None
@@ -87,6 +88,17 @@ def _int(name: str, default: int) -> int:
         raise ConfigError(f"{name} must be a whole number, got {raw!r}") from None
 
 
+def _bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    raise ConfigError(f"{name} must be true or false, got {raw!r}")
+
+
 def load_settings() -> Settings:
     """Load CodeBase/.env (if present) without overriding variables already set in the environment."""
     load_dotenv(PROJECT_ROOT / ".env", override=False)
@@ -101,7 +113,8 @@ def load_settings() -> Settings:
         windows_mcp_command=os.environ.get("WINDOWS_MCP_COMMAND") or "windows-mcp",
         runs_dir=PROJECT_ROOT / "runs",
         judge_max_images=_int("JUDGE_MAX_IMAGES", 6),
-        judge_file_excerpt_chars=_int("JUDGE_FILE_EXCERPT_CHARS", 15_000),
+        agent2_ui_find_tools=_bool("AGENT2_UI_FIND_TOOLS", True),
+        judge_file_excerpt_chars=_int("JUDGE_FILE_EXCERPT_CHARS", 0) or None,  # 0 or unset: no limit
         agent2_func_min_per_test=_int("AGENT2_FUNC_MIN_PER_TEST", 10),
         agent2_func_turns_per_test=_int("AGENT2_FUNC_TURNS_PER_TEST", 40),
         samples_dir=Path(os.environ["SAMPLES_DIR"].strip().strip('"')) if os.environ.get("SAMPLES_DIR", "").strip() else None,

@@ -22,6 +22,7 @@ from mpagent.execute.context import func_block, prepare_func_tests
 from mpagent.execute.guardrails import CallPolicy, tool_guardrail
 from mpagent.execute.host import HostLaunch
 from mpagent.execute.observations import load_observations, save_observation
+from mpagent.execute.ui_find import UiFinder, make_ui_find_tools
 from mpagent.execute.windows_mcp import CallRecorder, windows_mcp_server
 from mpagent.hostnotes import host_navigation, host_process
 from mpagent.models import (
@@ -47,8 +48,13 @@ class Agent2Error(Exception):
     """Agent 2 didn't finish (time limit, turn limit or LLM error); recorded observations are kept."""
 
 
-def instructions(host_id: str, skills_dir: Path = SKILLS_DIR, with_host_interaction: bool = False) -> str:
-    names = ["windows-installer.md", "evidence.md"] + (["host-interaction.md"] if with_host_interaction else [])
+def instructions(host_id: str, skills_dir: Path = SKILLS_DIR, with_host_interaction: bool = False,
+                 with_ui_find: bool = False) -> str:
+    """Agent 2's skills. `with_ui_find` (UI_FIND_TOOLS_PLAN.md) adds the find-by-name tool rules and the host's
+    step sequences; without it the instructions are exactly as before."""
+    with_ui_find = with_ui_find and with_host_interaction
+    names = (["windows-installer.md", "evidence.md"] + (["host-interaction.md"] if with_host_interaction else [])
+             + (["ui-find.md"] if with_ui_find else []))
     parts = [(skills_dir / "execute" / n).read_text(encoding="utf-8") for n in names]
     host_note = skills_dir / "hosts" / f"{host_id}.md"
     if host_note.exists():
@@ -56,6 +62,9 @@ def instructions(host_id: str, skills_dir: Path = SKILLS_DIR, with_host_interact
     navigation = host_navigation(host_id, skills_dir / "hosts") if with_host_interaction else None
     if navigation:  # host-only guidance, after the generic skills whose rules come first (Q14)
         parts.append(navigation)
+    steps = host_navigation(host_id, skills_dir / "hosts", "navigation_steps") if with_ui_find else None
+    if steps:
+        parts.append(steps)
     return "\n\n".join(parts)
 
 
@@ -219,12 +228,16 @@ async def _run(plan: TestPlan, run_dir: Path, installer_path: Path, settings: Se
                         host_running=lambda: bool(host and host_mod.running_pids(host.processes)))
     guard = tool_guardrail(run_dir, trace, policy=policy)
     server = windows_mcp_server(settings, recorder, [guard])
+    ui_find = settings.agent2_ui_find_tools and host is not None
+    tools = [make_record_observation(ObservationRecorder(run_dir, plan, recorder, trace, policy))]
+    if ui_find:  # find/click/type by name in the host's windows; Windows-MCP stays the fallback (ADR-047)
+        tools += make_ui_find_tools(UiFinder(host.processes, trace))
     async with server:
         agent = Agent(
             name="test-executor",
-            instructions=instructions(plan.app.host_id, with_host_interaction=host is not None),
+            instructions=instructions(plan.app.host_id, with_host_interaction=host is not None, with_ui_find=ui_find),
             mcp_servers=[server],
-            tools=[make_record_observation(ObservationRecorder(run_dir, plan, recorder, trace, policy))],
+            tools=tools,
             output_type=Agent2Result,
             model=settings.agent_model(),
             model_settings=ModelSettings(parallel_tool_calls=False),  # desktop actions happen one at a time

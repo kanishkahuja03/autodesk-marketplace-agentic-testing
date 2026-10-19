@@ -135,3 +135,17 @@ def test_load000_on_a_sample_is_judged_with_the_feature_cards_context_quotes(tmp
     text, _ = judge.build_request(fplan, t, claim, obs, tmp_path, None)
     assert "CLAIM TO JUDGE: The host shows a document of the sample 'SampleProject' open" in text
     assert 'D3: "must be in a P&ID project"' in text and "<output_files" not in text
+
+
+def test_without_a_limit_the_judge_reads_the_whole_output_file(tmp_path):
+    from mpagent.config import load_settings
+    from mpagent.execute.verdict import output_dir
+
+    out = output_dir(tmp_path, "FUNC-001")
+    out.mkdir(parents=True)
+    body = '{"items": [' + ",".join(['{"x": 1}'] * 5000) + '], "last": "END"}'
+    (out / "big.json").write_text(body, encoding="utf-8")
+    text = judge.file_excerpts(tmp_path, "FUNC-001")  # default: no limit
+    assert '"last": "END"' in text and "cut off" not in text
+    assert judge.read_text(out / "big.json", None) == (body, True)
+    assert load_settings().judge_file_excerpt_chars is None or load_settings().judge_file_excerpt_chars > 0
