@@ -37,6 +37,7 @@ This file only tells you **where things are in the host** and the fastest way to
 - Never type commands that change settings or system variables, and never `SAVE`, `QSAVE` or `SAVEAS` on a drawing you didn't create in the run folder.
 
 ## 6. File dialogs
+- The open dialog is titled **Select File**; it belongs to the main window, so `WaitFor` never sees it. After `OPEN`, **Open...** or a project's **Open...**, take a Snapshot without vision and look for its file name box (host-interaction skill, "Waiting for what opens inside the host"). Open it **once**: every further `OPEN` or click starts another one.
 - The host's open and save dialogs have a **file name** box. Type the **full path** (folder and file name) there and confirm with Enter or the dialog's **Open** / **Save** button; this is faster than browsing folders.
 - When a save dialog proposes a folder outside the run folder, replace it by typing the full path into the test's output folder.
 

@@ -18,6 +18,12 @@ Do the ENV and INST tests first, then LOAD, then FUNC, in the same host session.
 - `WaitFor`'s `window_name` is **plain text contained in the window title**, not a regular expression: pass a plain part of the main window title (e.g. the product's name, without `^`, `\d` or other pattern signs). A pattern never matches and wastes the whole timeout.
 - If the host crashes, hangs or closes on its own, follow section 9 (restart).
 
+### Waiting for what opens inside the host
+**Use `WaitFor` only for the host's main window after starting it.** Dialogs, file dialogs and panels that the host or the app opens usually belong to the main window, and `WaitFor` keeps seeing the main window as the active one, so it never sees them and waits for the whole timeout (run 20261016-163131: six waits for a file dialog, about five minutes lost).
+1. After an action that opens something, take a **`Snapshot` without vision**: it lists the new dialog's elements (fields, buttons) with their positions.
+2. If it isn't there yet, `Wait` 2–3 seconds and take another Snapshot, **at most three times**. Then take a `Screenshot` to see what happened.
+3. **Never repeat the action while you wait** (a second click, shortcut or command can open a second dialog or cancel the first). Try another way only after the Screenshot shows that nothing opened.
+
 ## 3. Choose every action by its lasting effect
 Before each action, ask: **what is still changed after this test, once the host is killed without saving?** Put the action in one of four classes:
 

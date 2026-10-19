@@ -140,3 +140,11 @@ def test_testability_is_judged_from_the_documents_not_from_u1():
     design = (SKILLS / "test-design" / "SKILL.md").read_text(encoding="utf-8")
     assert "**Judge the four points from the documents (`D…`, `I…`) only.**" in design
     assert "**`U1` never makes a feature untestable:**" in design
+
+
+def test_waitfor_only_for_the_main_window_dialogs_by_snapshot():
+    # run 20261016-163131: six WaitFor calls on an owned file dialog cost about five minutes
+    host = (SKILLS / "execute" / "host-interaction.md").read_text(encoding="utf-8")
+    for phrase in ("**Use `WaitFor` only for the host's main window after starting it.**",
+                   "**`Snapshot` without vision**", "**at most three times**", "**Never repeat the action while you wait**"):
+        assert phrase in host, phrase
