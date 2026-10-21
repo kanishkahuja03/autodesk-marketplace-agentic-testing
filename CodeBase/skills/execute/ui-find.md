@@ -21,4 +21,7 @@ You have three fast tools that act on the **host's windows** by an element's **n
    - a tool answers "not found", "not running", "took longer" or "failed";
    - the element isn't in the UI tree at all: some hosts draw tabs, toolbars or drawing areas themselves. If the navigation steps say an area needs a Screenshot, go there directly, without trying the name tools first.
 3. **Check what happened** after a click that changes the screen: take a `Screenshot` (it is also the reviewer's evidence, as before). If the wrong thing opened, close it without saving and use the fallback.
-4. All other rules stay: the action classes, "never repeat the action while you wait", one restart per test, where results are saved. The same call with the same arguments works at most three times.
+4. **Dialogs and notices:** read their buttons in the Screenshot and answer with `click_ui("<button text>", control_type="Button")`; no Snapshot is needed for that.
+5. **Screenshot before Snapshot:** to see what is on screen, take a Screenshot (a few seconds). Take a Snapshot only when a test needs one (e.g. the one its record requires) or when neither the name tools nor a Screenshot give you what you need.
+6. **Areas marked "Screenshot only"** in the host's navigation steps: use neither the name tools nor a Snapshot there, **even when a claim names an element in that area**; a Screenshot and a click by its coordinates are the fastest way.
+7. All other rules stay: the action classes, "never repeat the action while you wait", one restart per test, where results are saved. The same call with the same arguments works at most three times.

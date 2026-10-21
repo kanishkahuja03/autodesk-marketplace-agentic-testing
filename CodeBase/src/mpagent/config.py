@@ -30,6 +30,7 @@ class Settings:
     judge_file_excerpt_chars: int | None = None  # all output files of one claim together; None: no limit (F17)
     agent2_func_min_per_test: int = 10  # time allowance per FUNC test, added to agent2_timeout_min (F15)
     agent2_func_turns_per_test: int = 40  # turn allowance per FUNC test, added to agent2_max_turns (F15)
+    agent2_reasoning_effort: str | None = None  # Agent 2's reasoning effort; None = the model's default
     agent2_ui_find_tools: bool = True  # find/click/type UI elements by name, Windows-MCP as fallback (UI_FIND_TOOLS_PLAN.md)
     samples_dir: Path | None = None  # TEMPORARY (POC): the one sample, a file or a folder (F18, Q14)
     # TEMPORARY (until the OpenAI key arrives): Gemini through Google's OpenAI-compatible endpoint.
@@ -99,6 +100,18 @@ def _bool(name: str, default: bool) -> bool:
     raise ConfigError(f"{name} must be true or false, got {raw!r}")
 
 
+REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def _effort(name: str) -> str | None:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return None
+    if raw not in REASONING_EFFORTS:
+        raise ConfigError(f"{name} must be one of {', '.join(REASONING_EFFORTS)} (or empty), got {raw!r}")
+    return raw
+
+
 def load_settings() -> Settings:
     """Load CodeBase/.env (if present) without overriding variables already set in the environment."""
     load_dotenv(PROJECT_ROOT / ".env", override=False)
@@ -114,6 +127,7 @@ def load_settings() -> Settings:
         runs_dir=PROJECT_ROOT / "runs",
         judge_max_images=_int("JUDGE_MAX_IMAGES", 6),
         agent2_ui_find_tools=_bool("AGENT2_UI_FIND_TOOLS", True),
+        agent2_reasoning_effort=_effort("AGENT2_REASONING_EFFORT"),
         judge_file_excerpt_chars=_int("JUDGE_FILE_EXCERPT_CHARS", 0) or None,  # 0 or unset: no limit
         agent2_func_min_per_test=_int("AGENT2_FUNC_MIN_PER_TEST", 10),
         agent2_func_turns_per_test=_int("AGENT2_FUNC_TURNS_PER_TEST", 40),

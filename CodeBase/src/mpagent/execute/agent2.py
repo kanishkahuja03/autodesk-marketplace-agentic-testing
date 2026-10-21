@@ -240,7 +240,7 @@ async def _run(plan: TestPlan, run_dir: Path, installer_path: Path, settings: Se
             tools=tools,
             output_type=Agent2Result,
             model=settings.agent_model(),
-            model_settings=ModelSettings(parallel_tool_calls=False),  # desktop actions happen one at a time
+            model_settings=agent2_model_settings(settings),
         )
         prompt = build_input(plan, run_dir, installer_path, env000, facts, host, func)
         trace.write("agent2_request", input=prompt)
@@ -276,3 +276,13 @@ def limits(plan: TestPlan, settings: Settings) -> tuple[int, int]:
     n = sum(t.category is Category.FUNC for t in plan.testcases)
     return (settings.agent2_timeout_min + n * settings.agent2_func_min_per_test,
             settings.agent2_max_turns + n * settings.agent2_func_turns_per_test)
+
+
+def agent2_model_settings(settings: Settings) -> ModelSettings:
+    """One desktop action at a time; the reasoning effort only when AGENT2_REASONING_EFFORT is set (a lower
+    effort answers each step faster), otherwise the model's default, as before."""
+    if settings.agent2_reasoning_effort and not settings.uses_temporary_gemini:
+        from openai.types.shared import Reasoning
+
+        return ModelSettings(parallel_tool_calls=False, reasoning=Reasoning(effort=settings.agent2_reasoning_effort))
+    return ModelSettings(parallel_tool_calls=False)

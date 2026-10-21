@@ -107,6 +107,7 @@ The navigation file **was** followed, but Windows-MCP can click only by coordina
 | G5 (switch default) | **On by default** (`AGENT2_UI_FIND_TOOLS=true`); `false` gives exactly today's behaviour. Windows-MCP stays the fallback. |
 | G6 (fallback) | Agent 2 uses Windows-MCP (Screenshot + click by coordinates) **whenever a name isn't found or the element isn't in the UI tree** (e.g. the ribbon), without first trying the name tools there. Note: LOAD-000 still needs **one Snapshot** before it is recorded (its `window_in_ui` check reads the Snapshot text, D46), so "≤ 2 Snapshots in LOAD-000" stays the target. |
 | G7 (evidence) | The tools take **no screenshots**; Agent 2's own Screenshots after each step stay the judge's evidence. |
+| G8 (after run 20261019-161125, 2026-10-19) | Agent 2 9 min 33 s (was 15 min 53 s). Next cuts: (1) start-up notices and the Project Manager's Open steps through `click_ui` without a Snapshot first; (2) areas marked "Screenshot only" (the ribbon) get neither name tools nor Snapshots, even for a claim's names; (3) `AGENT2_REASONING_EFFORT` in `.env` (empty = the model's default, as before). |
 | G2 (speed) | **No separate measurement step;** build as planned and measure in the live run. Must hold: Windows-MCP stays the fallback whenever a name isn't found or is ambiguous, today's behaviour is unchanged with the switch off, and both kinds of calls (new tools and Windows-MCP) are logged in `trace.jsonl`. |
 
 ## 9. Open points to confirm

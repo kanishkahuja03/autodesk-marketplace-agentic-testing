@@ -159,3 +159,12 @@ def test_navigation_steps_are_named_by_the_host_profile():
     assert steps and 'click_ui("P&ID Drawings", control_type="TreeItem", double=True)' in steps
     assert 'type_ui("File name:"' in steps and "Screenshot only" in steps
     assert host_navigation("none", SKILLS / "hosts", "navigation_steps") is None
+
+
+def test_name_tools_answer_dialogs_and_skip_screenshot_only_areas():
+    ui = (SKILLS / "execute" / "ui-find.md").read_text(encoding="utf-8")
+    for phrase in ("**Dialogs and notices:**", "**Screenshot before Snapshot:**", "**Areas marked \"Screenshot only\"**",
+                   "even when a claim names an element in that area"):
+        assert phrase in ui, phrase
+    steps = (SKILLS / "hosts" / "navigation" / "plant3d-navigation-steps.md").read_text(encoding="utf-8")
+    assert "## 0. Start-up" in steps and "**without a Snapshot first**" in steps and "**Screenshot only:**" in steps

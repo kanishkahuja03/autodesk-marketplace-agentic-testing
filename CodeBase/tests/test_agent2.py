@@ -320,3 +320,13 @@ def test_ui_find_switch_is_on_by_default_and_can_be_turned_off(monkeypatch):
     assert load_settings().agent2_ui_find_tools is False
     monkeypatch.setenv("AGENT2_UI_FIND_TOOLS", "true")
     assert load_settings().agent2_ui_find_tools is True
+
+
+def test_reasoning_effort_is_only_sent_when_set(monkeypatch):
+    base = load_settings()
+    assert agent2.agent2_model_settings(replace(base, agent2_reasoning_effort=None)).reasoning is None  # as before
+    low = agent2.agent2_model_settings(replace(base, agent2_reasoning_effort="low"))
+    assert low.reasoning.effort == "low" and low.parallel_tool_calls is False
+    monkeypatch.setenv("AGENT2_REASONING_EFFORT", "fast")
+    with pytest.raises(Exception, match="AGENT2_REASONING_EFFORT must be one of"):
+        load_settings()
