@@ -168,3 +168,21 @@ def test_name_tools_answer_dialogs_and_skip_screenshot_only_areas():
         assert phrase in ui, phrase
     steps = (SKILLS / "hosts" / "navigation" / "plant3d-navigation-steps.md").read_text(encoding="utf-8")
     assert "## 0. Start-up" in steps and "**without a Snapshot first**" in steps and "**Screenshot only:**" in steps
+
+
+def test_generic_rules_for_busy_hosts_own_copy_and_open_containers():
+    host = (SKILLS / "execute" / "host-interaction.md").read_text(encoding="utf-8")
+    for phrase in ("**A busy host answers slowly.**", "**Look instead of waiting blindly:**",
+                   "**Always open the copy by its full path**", "open that container before you record"):
+        assert phrase in host, phrase
+    ui = (SKILLS / "execute" / "ui-find.md").read_text(encoding="utf-8")
+    assert "**Between the steps of a known sequence**" in ui and "**LOAD-000 without a Snapshot:**" in ui
+    steps = (SKILLS / "hosts" / "navigation" / "plant3d-navigation-steps.md").read_text(encoding="utf-8")
+    assert "**Always do steps 1–3**" in steps
+
+
+def test_load000_needs_a_snapshot_only_without_the_name_tools():
+    # run 20261021-130847: the Snapshot the LOAD-000 step asked for took 148 s although code can read the titles
+    host = (SKILLS / "execute" / "host-interaction.md").read_text(encoding="utf-8")
+    assert "**only if you don't have the `find_ui` / `click_ui` / `type_ui` tools**, a `Snapshot` too" in host
+    assert "take one only if `record_observation` asks for it" in host

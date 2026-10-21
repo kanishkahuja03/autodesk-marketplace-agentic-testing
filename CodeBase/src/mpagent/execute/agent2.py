@@ -10,6 +10,7 @@ import asyncio
 import io
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from agents import Agent, MaxTurnsExceeded, ModelSettings, Runner, function_tool
@@ -136,8 +137,11 @@ class ObservationRecorder:
     """What the record_observation tool does: validate the test id, attach pending screenshots, save."""
 
     def __init__(self, run_dir: Path, plan: TestPlan, recorder: CallRecorder, trace: Trace,
-                 policy: CallPolicy | None = None):
+                 policy: CallPolicy | None = None, window_titles: Callable[[], list[str]] | None = None):
+        """`window_titles` (find-by-name tools on): the host's window titles read by code, so a test checked
+        from the window titles (LOAD-000) needs no Snapshot; without it, or if it finds none, a Snapshot."""
         self.run_dir, self.recorder, self.trace, self.policy = run_dir, recorder, trace, policy
+        self.window_titles = window_titles
         self.install_tests = {t.id for t in plan.testcases if "install_exit_code" in t.observe}
         self.ids = {t.id for t in plan.testcases}
         self.tree_tests = {t.id for t in plan.testcases if any(e.check is Check.WINDOW_IN_UI for e in t.expected)}
@@ -159,7 +163,10 @@ class ObservationRecorder:
             # run 20261013-175002: INST-001 was recorded as executed although msiexec /i never ran
             return (f"Not recorded: {test_id} observes install_exit_code, but the installer hasn't run in this run. "
                     "Run the silent install first (windows-installer skill), then record the exit code from the log.")
+        titles_file = None
         if executed and test_id in self.tree_tests and not self.recorder.has_pending_snapshot():
+            titles_file = self._save_window_titles(test_id)
+        if executed and test_id in self.tree_tests and not self.recorder.has_pending_snapshot() and not titles_file:
             # the UI tree decides this test (LOAD_TESTS_PLAN.md L5); it needs a Snapshot taken for it
             return (f"Not recorded: {test_id} is checked from the UI tree, but you took no Snapshot since the "
                     "previous record_observation. Take a Snapshot of the host window first, then record again.")
@@ -175,14 +182,26 @@ class ObservationRecorder:
                     "Record again listing only files that exist (or none), and report only values you actually "
                     "saw in a tool result (use null otherwise).")
         named = [e.replace("\\", "/") for e in evidence]
+        pending = self.recorder.take_pending() + ([titles_file] if titles_file else [])
         obs = Observation(test_id=test_id, executed=executed, observed=observed,
-                          evidence=list(dict.fromkeys(named + self.recorder.take_pending())), picked=named,
-                          notes=notes)
+                          evidence=list(dict.fromkeys(named + pending)), picked=named, notes=notes)
         save_observation(self.run_dir, obs)
         self.trace.write("record_observation", observation=obs.model_dump(mode="json"))
         log.info("  %s observed: %s%s", test_id, ", ".join(f"{kv.key}={kv.value!r}" for kv in observed) or "-",
                  "" if executed else " (not executed)")
         return f"Recorded {test_id}."
+
+    def _save_window_titles(self, test_id: str) -> str | None:
+        """Write the host's window titles in the Snapshot's UI-tree form, so the window check reads them like a
+        Snapshot (UI_FIND_TOOLS_PLAN.md); None if there is no reader or no host window."""
+        titles = self.window_titles() if self.window_titles else []
+        if not titles:
+            return None
+        rel = f"evidence/{test_id}_windows_ui.txt"
+        lines = ["Host windows read by code through UI Automation (no Snapshot)", "", "UI Tree:", "desktop"]
+        lines += [f'├── window "{t}"' for t in titles]
+        (self.run_dir / rel).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return rel
 
     def _exists_in_run_dir(self, rel: str) -> bool:
         path = (self.run_dir / rel).resolve()
@@ -229,9 +248,12 @@ async def _run(plan: TestPlan, run_dir: Path, installer_path: Path, settings: Se
     guard = tool_guardrail(run_dir, trace, policy=policy)
     server = windows_mcp_server(settings, recorder, [guard])
     ui_find = settings.agent2_ui_find_tools and host is not None
-    tools = [make_record_observation(ObservationRecorder(run_dir, plan, recorder, trace, policy))]
-    if ui_find:  # find/click/type by name in the host's windows; Windows-MCP stays the fallback (ADR-047)
-        tools += make_ui_find_tools(UiFinder(host.processes, trace))
+    finder = UiFinder(host.processes, trace) if ui_find else None
+    observations = ObservationRecorder(run_dir, plan, recorder, trace, policy,
+                                       window_titles=finder.window_titles if finder else None)
+    tools = [make_record_observation(observations)]
+    if finder:  # find/click/type by name in the host's windows; Windows-MCP stays the fallback (ADR-047)
+        tools += make_ui_find_tools(finder)
     async with server:
         agent = Agent(
             name="test-executor",

@@ -13,6 +13,7 @@ the observation. `judged` UI claims (L20-L25) are decided by the LLM judge from 
 guards kept by code. Agent 2's own value is kept only for the report.
 """
 
+import concurrent.futures
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -38,7 +39,7 @@ from mpagent.models import (
 
 ALWAYS_KNOWN = {"INSTALLER_PATH", "RUN_DIR"}  # given to Agent 2 by code
 EVIDENCE_DIR = "evidence"
-UI_TEXT_SUFFIX = "_Snapshot_ui.txt"  # raw Snapshot text saved by the call recorder
+UI_TEXT_SUFFIX = "_ui.txt"  # raw Snapshot text saved by the recorder, or host window titles read by code
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg")
 
 # (test, its judged expectation, its observation) -> the judge's answer; raises if the call fails
@@ -140,13 +141,14 @@ def _evaluate_test(t: TestCase, obs: Observation | None, resolved_env: set[str] 
         return result(Status.ERROR, [], "not executed by Agent 2")
 
     values = {kv.key: kv.value for kv in obs.observed}
+    pending = _judge_in_parallel(t, obs, ui)
     checks: list[CheckResult] = []
     missing: list[str] = []
     ui_errors: list[str] = []
     for e in t.expected:
         expected = e.values if e.check is Check.IN else e.value
         if e.check is Check.JUDGED:
-            check, problem, judgement = _judged_check(t, e, obs, ui, values.get(e.key))
+            check, problem, judgement = _judged_check(t, e, obs, ui, values.get(e.key), pending.get(id(e)))
             checks.append(check)
             if judgement:
                 judged.append(JudgedClaim(claim=e.value, judgement=judgement))
@@ -182,8 +184,21 @@ def _evaluate_test(t: TestCase, obs: Observation | None, resolved_env: set[str] 
     return result(Status.PASS, checks, judged_reason)
 
 
-def _judged_check(t: TestCase, e: Expectation, obs: Observation, ui: UiContext,
-                  reported: Scalar) -> tuple[CheckResult, str | None, Judgement | None]:
+def _judge_in_parallel(t: TestCase, obs: Observation, ui: UiContext) -> dict[int, concurrent.futures.Future]:
+    """A test's judged claims are independent: ask the judge about all of them at once (same inputs, same
+    rules; only the waiting overlaps). {} when there is at most one claim, no judge or no screenshot."""
+    claims = [e for e in t.expected if e.check is Check.JUDGED]
+    shots = [r for r in obs.evidence if r.lower().endswith(IMAGE_SUFFIXES)]
+    if ui.judge is None or len(claims) < 2 or not shots:
+        return {}
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(claims), thread_name_prefix="judge")
+    futures = {id(e): pool.submit(ui.judge, t, e, obs) for e in claims}
+    pool.shutdown(wait=False)
+    return futures
+
+
+def _judged_check(t: TestCase, e: Expectation, obs: Observation, ui: UiContext, reported: Scalar,
+                  pending: concurrent.futures.Future | None = None) -> tuple[CheckResult, str | None, Judgement | None]:
     """A UI claim decided by the judge, inside code guards (LOAD_TESTS_PLAN.md L25): never without
     screenshots, never on a screenshot that isn't attached to this test, a failed call is an ERROR."""
 
@@ -198,7 +213,7 @@ def _judged_check(t: TestCase, e: Expectation, obs: Observation, ui: UiContext,
     if ui.judge is None:
         return make(None), f"{e.key}: no judge available to decide the UI claim", None
     try:
-        judgement = ui.judge(t, e, obs)
+        judgement = pending.result() if pending is not None else ui.judge(t, e, obs)
     except Exception as ex:  # noqa: BLE001 - a judge problem is this test's ERROR, never a crashed run
         return make(None), f"{e.key}: the judge call failed ({type(ex).__name__}: {ex})", None
     names = {s: s for s in shots} | {Path(s).name: s for s in shots}

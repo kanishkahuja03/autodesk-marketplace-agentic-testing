@@ -306,7 +306,7 @@ def test_ui_find_tools_add_their_skill_only_when_switched_on():
     # UI_FIND_TOOLS_PLAN.md: with the switch off, Agent 2's instructions are exactly as before
     before = agent2.instructions("autocad-plant3d", with_host_interaction=True)
     assert agent2.instructions("autocad-plant3d", with_host_interaction=True, with_ui_find=False) == before
-    assert "find_ui" not in before and "Steps with the name tools" not in before
+    assert "# Finding UI elements by name" not in before and "steps with the name tools" not in before
     on = agent2.instructions("autocad-plant3d", with_host_interaction=True, with_ui_find=True)
     assert on.startswith(before.split("\n\n")[0]) and "# Finding UI elements by name" in on
     assert "# AutoCAD Plant 3D: steps with the name tools" in on
@@ -330,3 +330,24 @@ def test_reasoning_effort_is_only_sent_when_set(monkeypatch):
     monkeypatch.setenv("AGENT2_REASONING_EFFORT", "fast")
     with pytest.raises(Exception, match="AGENT2_REASONING_EFFORT must be one of"):
         load_settings()
+
+
+def test_load000_can_be_recorded_with_window_titles_read_by_code(tmp_path):
+    from mpagent.design.agent1 import add_built_in_tests
+    from mpagent.hostnotes import host_process
+
+    trace = Trace(tmp_path)
+    calls = CallRecorder(tmp_path, trace)
+    (tmp_path / "evidence").mkdir()
+    lplan = add_built_in_tests(TestPlan.model_validate(good_plan_data()), FACTS, host_process("autocad-plant3d"))
+    values = [KeyValue(key=k, value=v) for k, v in (("host_started", True), ("document_opened", True),
+                                                    ("error_dialog_seen", False), ("load_prompt_seen", False))]
+    without = agent2.ObservationRecorder(tmp_path, lplan, calls, trace)
+    assert "took no Snapshot" in without.record("LOAD-000", True, values, [], None)  # as before
+    no_window = agent2.ObservationRecorder(tmp_path, lplan, calls, trace, window_titles=list)
+    assert "took no Snapshot" in no_window.record("LOAD-000", True, values, [], None)  # nothing read: Snapshot
+    rec = agent2.ObservationRecorder(tmp_path, lplan, calls, trace, window_titles=lambda: ["Host - [Drawing1.dwg]"])
+    assert rec.record("LOAD-000", True, values, [], None) == "Recorded LOAD-000."
+    saved = load_observations(tmp_path)[0]
+    assert saved.evidence == ["evidence/LOAD-000_windows_ui.txt"]
+    assert 'window "Host - [Drawing1.dwg]"' in (tmp_path / saved.evidence[0]).read_text(encoding="utf-8")

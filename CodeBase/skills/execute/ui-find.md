@@ -24,4 +24,6 @@ You have three fast tools that act on the **host's windows** by an element's **n
 4. **Dialogs and notices:** read their buttons in the Screenshot and answer with `click_ui("<button text>", control_type="Button")`; no Snapshot is needed for that.
 5. **Screenshot before Snapshot:** to see what is on screen, take a Screenshot (a few seconds). Take a Snapshot only when a test needs one (e.g. the one its record requires) or when neither the name tools nor a Screenshot give you what you need.
 6. **Areas marked "Screenshot only"** in the host's navigation steps: use neither the name tools nor a Snapshot there, **even when a claim names an element in that area**; a Screenshot and a click by its coordinates are the fastest way.
-7. All other rules stay: the action classes, "never repeat the action while you wait", one restart per test, where results are saved. The same call with the same arguments works at most three times.
+7. **Between the steps of a known sequence** (e.g. the host's navigation steps), check each result with a Screenshot, never a Snapshot.
+8. **LOAD-000 without a Snapshot:** with these tools on, code reads the host's window titles itself when you record LOAD-000, so a Screenshot of the open document is enough. Take a Snapshot only if `record_observation` asks for one.
+9. All other rules stay: the action classes, "never repeat the action while you wait", one restart per test, where results are saved. The same call with the same arguments works at most three times.

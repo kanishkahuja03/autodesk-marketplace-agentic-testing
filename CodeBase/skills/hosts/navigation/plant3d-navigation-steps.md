@@ -12,13 +12,13 @@ Exact names as AutoCAD Plant 3D 2027 shows them (English UI). Take **one Screens
 - The Project Manager panel and the Start page are then ready; go straight to A (or B).
 
 ## A. Open a project and a drawing in it (Project Manager)
-Do steps 1–3 with the name tools **without a Snapshot first**; only if a step answers "not found", take a Screenshot and click by coordinates.
+**Always do steps 1–3**, even when the Project Manager already shows a project with the same name: Plant 3D remembers the last project, which may be an earlier run's copy. Do them with the name tools **without a Snapshot first**; only if a step answers "not found", take a Screenshot and click by coordinates. After steps 4–6, check with a **Screenshot only**.
 1. `click_ui("Open", control_type="Button")`: the button beside the project combo box at the top of the Project Manager; the project list opens. *(The quick-access toolbar also has an "Open"; if a file dialog opens instead, close it with Esc and click the button beside the combo box by coordinates.)*
 2. `click_ui("Open...", control_type="ListItem")`: the "Select File" dialog opens.
 3. `type_ui("File name:", "<full path of the copy's Project.xml>", press_enter=True)`: the project opens; the combo box shows its name.
 4. `click_ui("P&ID Drawings", control_type="TreeItem", double=True)`: its folders appear (e.g. a folder per area).
 5. `click_ui("<folder name>", control_type="TreeItem", double=True)`: its drawings appear.
-6. `click_ui("<drawing name>", control_type="TreeItem", double=True)`: the drawing opens; its name appears in the main window title. Wait 3–5 seconds, then take a Screenshot.
+6. `click_ui("<drawing name>", control_type="TreeItem", double=True)`: the drawing opens; its name appears in the main window title. Take a Screenshot; if the drawing isn't shown yet, Wait 3 seconds and look again.
 
 Use `find_ui("<name>", control_type="TreeItem")` to list a folder's drawings when you don't know their names.
 

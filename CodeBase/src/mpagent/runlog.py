@@ -8,6 +8,7 @@ import json
 import logging
 import logging.handlers
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -60,6 +61,9 @@ def stop_logging() -> None:
         log.removeHandler(handler)
 
 
+_TRACE_LOCK = threading.Lock()
+
+
 class Trace:
     """Appends one JSON object per line to <run_dir>/trace.jsonl (LLM requests/responses, MCP calls)."""
 
@@ -68,5 +72,6 @@ class Trace:
 
     def write(self, event: str, **data) -> None:
         record = {"time": datetime.now().astimezone().isoformat(timespec="seconds"), "event": event, **data}
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        line = json.dumps(record, ensure_ascii=False, default=str) + "\n"
+        with _TRACE_LOCK, self.path.open("a", encoding="utf-8") as f:  # judge calls may write at the same time
+            f.write(line)

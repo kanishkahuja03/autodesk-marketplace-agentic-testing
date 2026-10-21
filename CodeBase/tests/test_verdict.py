@@ -300,7 +300,8 @@ def func_plan() -> TestPlan:
 
 
 def func_judged_results(tmp_path, answers: list[Judgement]):
-    """FUNC-001 with two judged claims and output_created; the judge answers in order."""
+    """FUNC-001 with two judged claims and output_created; the judge answers per claim, in the claims' order
+    (the claims are judged in parallel, so the answer is picked by the claim, not by call order)."""
     from mpagent.execute.verdict import output_dir
 
     out = output_dir(tmp_path, "FUNC-001")
@@ -310,12 +311,11 @@ def func_judged_results(tmp_path, answers: list[Judgement]):
                   load_prompt_seen=False)
     o001 = ui_obs(tmp_path, "LOAD-001", HOST, entry_point_seen="a tab")
     ofunc = ui_obs(tmp_path, "FUNC-001", None, feature_result_seen="a file was saved", output_files="result.json")
-    queue = list(answers)
-
-    def judge(t, e, o):  # LOAD tests: PASS on their own screenshot; FUNC claims: the given answers in order
+    def judge(t, e, o):  # LOAD tests: PASS on their own screenshot; FUNC claims: the answer for that claim
         if t.category.value == "LOAD":
             return judgement(evidence=[next(x for x in o.evidence if x.endswith(".png"))])
-        return queue.pop(0)
+        claims = [x for x in t.expected if x.check is Check.JUDGED]
+        return answers[claims.index(e)]
     ui = UiContext(tmp_path, host_process("autocad-plant3d").main_window, judge)
     return {r.test_id: r for r in evaluate(func_plan(), happy() + [o000, o001, ofunc], set(), ui)}["FUNC-001"]
 
@@ -349,3 +349,51 @@ def test_func_report_shows_each_claim(tmp_path):
     assert run.counts["PASS"] == 8
     html = (tmp_path / "report.html").read_text(encoding="utf-8")
     assert "The file holds assets and lines" in html and 'href="evidence/FUNC-001/r.json"' in html
+
+
+def test_a_tests_judged_claims_are_asked_at_the_same_time(tmp_path):
+    import threading
+    import time
+
+    running, peak, lock = [0], [0], threading.Lock()
+
+    def judge(t, e, o):
+        if t.category.value == "LOAD":
+            return judgement(evidence=[next(x for x in o.evidence if x.endswith(".png"))])
+        with lock:
+            running[0] += 1
+            peak[0] = max(peak[0], running[0])
+        time.sleep(0.3)
+        with lock:
+            running[0] -= 1
+        return judgement(evidence=["evidence/FUNC-001_Screenshot_1.png"])
+
+    from mpagent.execute.verdict import output_dir
+
+    output_dir(tmp_path, "FUNC-001").mkdir(parents=True)
+    (output_dir(tmp_path, "FUNC-001") / "r.json").write_text("{}", encoding="utf-8")
+    observations = happy() + [
+        ui_obs(tmp_path, "LOAD-000", HOST, host_started=True, document_opened=True, error_dialog_seen=False,
+               load_prompt_seen=False),
+        ui_obs(tmp_path, "LOAD-001", HOST, entry_point_seen="a tab"),
+        ui_obs(tmp_path, "FUNC-001", None, feature_result_seen="saved", output_files="r.json")]
+    started = time.monotonic()
+    r = {x.test_id: x for x in evaluate(func_plan(), observations, set(),
+                                        UiContext(tmp_path, host_process("autocad-plant3d").main_window, judge))}
+    assert peak[0] == 2 and time.monotonic() - started < 0.55  # two claims at once, not one after the other
+    assert r["FUNC-001"].status is Status.PASS and len(r["FUNC-001"].judgements) == 2
+
+
+def test_window_titles_read_by_code_decide_load000_like_a_snapshot(tmp_path):
+    # UI_FIND_TOOLS_PLAN.md: the host's window titles, written in the Snapshot's UI-tree form
+    path = tmp_path / "evidence"
+    path.mkdir(exist_ok=True)
+    (path / "LOAD-000_windows_ui.txt").write_text(
+        'Host windows read by code\n\nUI Tree:\ndesktop\n├── window "Autodesk AutoCAD Plant 3D 2027 - [Drawing1.dwg]"\n',
+        encoding="utf-8")
+    o000 = obs("LOAD-000", host_started=True, document_opened=True, error_dialog_seen=False, load_prompt_seen=False)
+    o000 = o000.model_copy(update={"evidence": ["evidence/LOAD-000_windows_ui.txt"]})
+    ui = UiContext(tmp_path, host_process("autocad-plant3d").main_window, None)
+    r = {x.test_id: x for x in evaluate(add_built_in_tests(TestPlan.model_validate(good_plan_data()), FACTS,
+                                                         host_process("autocad-plant3d")), happy() + [o000], set(), ui)}
+    assert r["LOAD-000"].status is Status.PASS

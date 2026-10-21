@@ -52,7 +52,7 @@ def host_tree_text(run_dir: Path, obs: Observation, main_window: str | None) -> 
     """The host window's part of the attached Snapshot texts, one `type "name"` line per element."""
     lines: list[str] = []
     for rel in obs.evidence:
-        if not rel.endswith("_Snapshot_ui.txt") or not (run_dir / rel).is_file():
+        if not rel.endswith("_ui.txt") or not (run_dir / rel).is_file():
             continue
         text = (run_dir / rel).read_text(encoding="utf-8", errors="replace")
         windows = ui_tree.host_windows(text, main_window) if main_window else []

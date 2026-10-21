@@ -31,6 +31,9 @@ class FakeBackend:
         return [e for e in self.elements if name.casefold() in e.name.casefold()
                 and (control_type is None or e.control_type == control_type)]
 
+    def titles(self, pids):
+        return ["Host main window - [Doc1]"]
+
     def click(self, match, double):
         self.clicks.append((match.name, double))
 
@@ -39,8 +42,10 @@ class FakeBackend:
 
 
 def finder(tmp_path, backend, pids=None, timeout_s=5):
-    return UiFinder(["host.exe"], Trace(tmp_path), backend=backend,
-                    pids=pids or (lambda processes: {4242: "host.exe"}), timeout_s=timeout_s)
+    f = UiFinder(["host.exe"], Trace(tmp_path), backend=backend,
+                 pids=pids or (lambda processes: {4242: "host.exe"}), timeout_s=timeout_s)
+    f.retry_after_s = 0.01  # the one retry for a host that is still loading, fast in tests
+    return f
 
 
 def trace_events(tmp_path):
@@ -94,3 +99,30 @@ def test_repeat_limit_unknown_type_and_empty_name(tmp_path):
 
 def test_typed_text_keeps_send_keys_special_characters_literal():
     assert escape_keys(r"C:\a (1)+b%{x}~.json") == r"C:\a {(}1{)}{+}b{%}{{}x{}}{~}.json"
+
+
+def test_not_found_is_searched_once_more_for_a_host_that_is_still_loading(tmp_path):
+    class LateBackend(FakeBackend):
+        def find(self, pids, name, control_type):
+            found = super().find(pids, name, control_type)
+            return found if len(self.searched_pids) > 1 else []  # the first search sees nothing yet
+
+    backend = LateBackend([m("OK")])
+    assert finder(tmp_path, backend).click("OK").startswith("Clicked 'OK'")
+    assert len(backend.searched_pids) == 2 and backend.clicks == [("OK", False)]
+
+
+def test_host_pids_are_looked_up_once_for_several_calls_and_window_titles(tmp_path):
+    lookups = []
+
+    def pids(processes):
+        lookups.append(processes)
+        return {4242: "host.exe"}
+
+    f = finder(tmp_path, FakeBackend([m("Open")]), pids=pids)
+    f.find("Open")
+    f.click("Open")
+    assert f.window_titles() == ["Host main window - [Doc1]"]
+    assert len(lookups) == 1  # cached for a few seconds
+    assert trace_events(tmp_path)[-1]["tool"] == "window_titles"
+    assert finder(tmp_path, FakeBackend([]), pids=lambda processes: {}).window_titles() == []

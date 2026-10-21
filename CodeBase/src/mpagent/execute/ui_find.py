@@ -29,6 +29,8 @@ from mpagent.runlog import Trace, log
 MAX_MATCHES = 10
 SEARCH_TIMEOUT_S = 15  # one UI Automation query; then "not found", and Agent 2 falls back to Windows-MCP
 MAX_IDENTICAL_CALLS = 3  # like the guardrail for Windows-MCP calls (D36)
+RETRY_AFTER_S = 2.0  # a host that is still starting or loading may not expose its elements yet: search once more
+PIDS_CACHE_S = 10.0  # the host's process IDs are looked up (tasklist, ~1 s) at most this often
 FALLBACK = "Use Windows-MCP instead (Snapshot or Screenshot, then Click by label or coordinates)."
 CONTROL_TYPES = ("Button", "CheckBox", "ComboBox", "Edit", "Hyperlink", "List", "ListItem", "Menu", "MenuItem",
                  "Pane", "RadioButton", "Tab", "TabItem", "Text", "Tree", "TreeItem", "Window", "Document",
@@ -50,6 +52,7 @@ class Backend(Protocol):
     """Access to the desktop's UI; replaced by a fake in unit tests."""
 
     def find(self, pids: set[int], name: str, control_type: str | None) -> list[Match]: ...
+    def titles(self, pids: set[int]) -> list[str]: ...
     def click(self, m: Match, double: bool) -> None: ...
     def type_into(self, m: Match, text: str, press_enter: bool) -> None: ...
 
@@ -74,9 +77,11 @@ class UiFinder:
         from mpagent.execute.host import running_pids
 
         self.processes, self.trace, self.timeout_s = processes, trace, timeout_s
+        self.retry_after_s = RETRY_AFTER_S
         self._backend = backend
         self._pids = pids or running_pids
         self._calls: Counter = Counter()
+        self._pid_cache: tuple[float, set[int]] = (0.0, set())
         self._worker = _Worker()
 
     @property
@@ -101,6 +106,28 @@ class UiFinder:
                           lambda ms: f"Typed into {describe(ms[0])}" + (" and pressed Enter." if press_enter else "."),
                           lambda b, m: b.type_into(m, text, press_enter))
 
+    def window_titles(self) -> list[str]:
+        """The titles of the host's top-level windows (for LOAD-000's window check without a Snapshot);
+        [] if the host isn't running or UI Automation fails. Traced like the tools."""
+        started = time.monotonic()
+        try:
+            pids = self._host_pids()
+            titles = self._run(self.backend.titles, pids) if pids else []
+            result = f"{len(titles)} host window(s)"
+        except Exception as e:  # noqa: BLE001 - the caller falls back to asking Agent 2 for a Snapshot
+            titles, result = [], f"window_titles failed ({type(e).__name__}: {e})"
+        self.trace.write("ui_find_call", tool="window_titles", arguments={},
+                         seconds=round(time.monotonic() - started, 2), result=result, matches=titles)
+        return titles
+
+    def _host_pids(self) -> set[int]:
+        stamp, pids = self._pid_cache
+        if pids and time.monotonic() - stamp < PIDS_CACHE_S:
+            return pids
+        pids = set(self._pids(self.processes))
+        self._pid_cache = (time.monotonic(), pids)
+        return pids
+
     def _call(self, tool: str, args: dict, ok_text: Callable[[list[Match]], str],
               act: Callable[[Backend, Match], None] | None) -> str:
         started = time.monotonic()
@@ -108,12 +135,15 @@ class UiFinder:
         try:
             result = self._checked(tool, args)
             if result is None:
-                pids = set(self._pids(self.processes))
+                pids = self._host_pids()
                 if not pids:
                     result = f"The host is not running ({', '.join(self.processes)}). {FALLBACK}"
                 else:
                     backend = self.backend
                     found = self._run(backend.find, pids, args["name"], args["control_type"])
+                    if not found:  # once more, for a host that is still starting or loading
+                        time.sleep(self.retry_after_s)
+                        found = self._run(backend.find, self._host_pids(), args["name"], args["control_type"])
                     matches = order_matches(args["name"], found)
                     if not matches:
                         kind = f" of type {args['control_type']}" if args["control_type"] else ""
@@ -225,6 +255,9 @@ class UiaBackend:
                 out.append(Match(e.CurrentName or "", self.type_names.get(e.CurrentControlType, "Other"), title,
                                  (r.left + r.right) // 2, (r.top + r.bottom) // 2, bool(e.CurrentIsEnabled), e))
         return out
+
+    def titles(self, pids: set[int]) -> list[str]:
+        return [w.CurrentName or "" for w in self._host_windows(pids)]
 
     def _host_windows(self, pids: set[int]) -> list:
         u, auto = self.uia, self.auto
