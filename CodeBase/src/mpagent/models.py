@@ -5,6 +5,7 @@ Pydantic checks types when an object is created and can save/load the object as 
 
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -155,6 +156,8 @@ class InstallerFacts(BaseModel):
     registry: list[RegistryEntry] = []
     bundles: list[BundleManifest] = []
     embedded_documents: list[EmbeddedDocument] = []
+    ui_text: EmbeddedDocument | None = Field(
+        default=None, description="U1: readable UI text from the app's binaries (hints, LOAD_TESTS_PLAN.md L22)")
     notable_files: list[str] = Field(default_factory=list, description="Files worth attention, with the reason")
     warnings: list[str] = []
 
@@ -171,3 +174,285 @@ class IntakeManifest(BaseModel):
     metadata_file: str | None = None
     estimated_tokens: int = Field(description="Rough size of all document text in LLM tokens (chars / 4)")
     warnings: list[str] = []
+
+
+# ================================================================ test plan (Agent 1 output, ARCHITECTURE.md §6.1)
+# These models are sent to OpenAI as strict structured output, so every field is required (no defaults)
+# and there are no free-form dicts: key/value data is a list of KeyValue.
+
+Scalar = str | int | float | bool | None
+
+
+class Category(str, Enum):
+    ENV = "ENV"
+    INST = "INST"
+    LOAD = "LOAD"
+    FUNC = "FUNC"  # a documented feature is run and its result checked (FUNC_TESTS_PLAN.md)
+    UNIN = "UNIN"
+
+
+class Origin(str, Enum):
+    AGENT = "agent"
+    BUILT_IN = "built-in"
+
+
+class Priority(str, Enum):
+    P1 = "P1"
+    P2 = "P2"
+    P3 = "P3"
+
+
+class Check(str, Enum):
+    """How the verdict engine compares an observed value with the expected one (ARCHITECTURE.md §5)."""
+
+    EQUALS = "equals"
+    NOT_EQUALS = "not_equals"
+    IN = "in"
+    EXISTS = "exists"
+    NOT_EXISTS = "not_exists"
+    CONTAINS = "contains"
+    MATCHES = "matches"
+    # decided by code from the raw Snapshot UI tree, not from Agent 2's value (LOAD_TESTS_PLAN.md L11)
+    WINDOW_IN_UI = "window_in_ui"  # value: regex of a window/document title inside the host window
+    # decided by the LLM judge from the test's screenshots (LOAD_TESTS_PLAN.md L20, L21)
+    JUDGED = "judged"  # value: the documented UI claim in plain words
+    # decided by code from the test's output folder evidence/<test_id>/ (FUNC_TESTS_PLAN.md F7)
+    OUTPUT_CREATED = "output_created"  # value: null; PASS = at least one non-empty file in that folder
+
+
+# Checks decided from the evidence, never from Agent 2's own value
+UI_CHECKS = {Check.WINDOW_IN_UI, Check.JUDGED, Check.OUTPUT_CREATED}
+
+
+class Citation(BaseModel):
+    """Where a claim comes from. The self-check verifies that `quote` really appears in `doc`."""
+
+    doc: str = Field(
+        description="Source ID from the evidence pack: 'D1'.. (documents), 'I1'.. (embedded in the installer) or 'F1' (installer facts)"
+    )
+    line: int | None = Field(description="Line number where the quote starts, if known")
+    quote: str = Field(description="Exact text copied from the source")
+
+
+class Expectation(BaseModel):
+    """One check on one observed key, e.g. install_exit_code in [0, 3010]."""
+
+    key: str = Field(description="snake_case observation key; must be listed in the test's `observe`")
+    check: Check
+    value: Scalar = Field(description="Expected value for equals/not_equals/contains/matches; null otherwise")
+    values: list[str] | None = Field(description="Allowed values for 'in'; null otherwise")
+
+
+class TestCase(BaseModel):
+    __test__ = False  # not a pytest test class
+
+    id: str = Field(description="Unique ID: <CATEGORY>-<3 digits>, e.g. INST-002")
+    origin: Origin = Field(description="'agent' for every test Agent 1 writes; 'built-in' is reserved for code")
+    category: Category
+    title: str
+    source: Citation | None = Field(description="Required for agent tests; null only for built-in tests")
+    preconditions: list[str] = Field(description="IDs of tests that must PASS first, e.g. ['ENV-000', 'INST-001']")
+    steps: list[str] = Field(description="Plain-language intents for Agent 2, e.g. 'Install the MSI silently with a log'")
+    observe: list[str] = Field(description="snake_case keys Agent 2 must report, e.g. ['install_exit_code']")
+    expected: list[Expectation]
+    priority: Priority
+
+
+class InstallerRef(BaseModel):
+    file: str
+    type: str = Field(description="'msi', 'exe' or 'zip-bundle'")
+    product_code: str | None
+    signer_claimed: str | None
+
+
+class AppInfo(BaseModel):
+    name: str
+    publisher: str | None
+    version: str | None
+    host_id: str = Field(description="A host-notes ID from the catalogue, 'none' (standalone app) or 'unknown'")
+    host_evidence: list[Citation] = Field(description="Why this host was chosen; empty only for 'unknown'")
+    host_versions: list[str] = Field(description="Supported host versions named in the sources, e.g. ['2027']")
+    installer: InstallerRef
+
+
+class EntryPointKind(str, Enum):
+    RIBBON_TAB = "ribbon_tab"
+    MENU = "menu"
+    TOOLBAR = "toolbar"
+    COMMAND = "command"
+    OWN_WINDOW = "own_window"
+
+
+# Kinds that are visible in the host's UI right after start, so a LOAD test can look for them
+VISIBLE_ENTRY_POINTS = {EntryPointKind.RIBBON_TAB, EntryPointKind.MENU, EntryPointKind.TOOLBAR}
+
+
+class EntryPoint(BaseModel):
+    """Where the app shows up in its host, as its documents describe it (LOAD_TESTS_PLAN.md §4.1)."""
+
+    kind: EntryPointKind
+    label: str = Field(description="The exact text the UI should show, e.g. the ribbon tab name, copied from a source")
+    items: list[str] = Field(description="Buttons or commands inside it, only names quoted in a source")
+    use_context: str | None = Field(
+        description="What must be open to *use* the app (e.g. a kind of project or drawing), as the docs say; null if not stated")
+    sources: list[Citation] = Field(description="Quotes for the label, items and use_context")
+
+
+class FeatureCard(BaseModel):
+    """One documented feature of the app and whether a FUNC test can run it (FUNC_TESTS_PLAN.md F1, §4.1)."""
+
+    name: str = Field(description="The feature's name exactly as the documents write it")
+    how_started: str = Field(description="The entry point or command the documents give to start it")
+    context: str | None = Field(
+        description="What must be open to use it, in the documents' words; null if the documents state nothing")
+    sample: str | None = Field(
+        description="Name of the sample (from the samples listing) that gives this context its content; null if none is needed or none fits")
+    results: list[Citation] = Field(
+        description="Each statement the documents make about the feature's result, one citation per statement")
+    sources: list[Citation] = Field(description="Quotes for the name, how it is started and its context")
+    action_class: Literal[0, 1, 2, 3] = Field(
+        description="The highest action class using it as documented needs: 0 view, 1 session, 2 reversible, 3 lasting")
+    testable: bool
+    reason: str | None = Field(description="If not testable: which point fails and why; null if testable")
+    test_id: str | None = Field(description="The FUNC test that runs this feature; null if not testable")
+
+
+class Summary(BaseModel):
+    """Rendered into understanding.md."""
+
+    purpose: str
+    install_footprint: list[str]
+    commands_or_ui: list[str]
+    entry_point: EntryPoint | None = Field(description="The app's entry point in the host UI; null if not documented")
+    features: list[FeatureCard] = Field(description="One card per documented feature; empty if none is documented")
+    open_questions: list[str]
+
+
+class TestPlan(BaseModel):
+    """Agent 1's output and the content of testcases.yaml (ENV-000 is added by code afterwards)."""
+
+    __test__ = False  # not a pytest test class
+
+    app: AppInfo
+    summary: Summary
+    required_env: list[str] = Field(description="Every ${PLACEHOLDER} name used in steps or expected")
+    testcases: list[TestCase]
+
+
+# ================================================================ execution (ARCHITECTURE.md §6.2, §6.3)
+
+
+class KeyValue(BaseModel):
+    key: str
+    value: Scalar
+
+
+class Observation(BaseModel):
+    """One test's raw result, written by Agent 2's record_observation tool into observations.json. No status."""
+
+    test_id: str
+    executed: bool = Field(description="False if Agent 2 could not carry out the steps")
+    observed: list[KeyValue] = Field(description="One entry per key in the test's `observe` list")
+    evidence: list[str] = Field(description="Paths relative to the run folder, e.g. 'evidence/INST-001_install.log'")
+    picked: list[str] = Field(default_factory=list,
+                              description="Set by code: the evidence files Agent 2 named itself (the judge sees these "
+                                          "screenshots first)")
+    notes: str | None
+    findings: list[str] = Field(default_factory=list, description="Set by code only, e.g. leftovers (UNIN-000)")
+
+
+class Agent2Result(BaseModel):
+    """Agent 2's final output; the observations themselves were already recorded per test."""
+
+    done: bool
+    env: list[KeyValue] = Field(description="Resolved value of every required_env placeholder")
+
+
+class Status(str, Enum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    NEEDS_REVIEW = "NEEDS_REVIEW"  # only a human looking at the screenshot can decide
+    BLOCKED = "BLOCKED"
+    ERROR = "ERROR"
+
+
+class CheckResult(BaseModel):
+    key: str
+    check: Check
+    expected: Scalar | list[str]
+    observed: Scalar
+    ok: bool
+    needs_review: bool = False
+    reported: Scalar = Field(default=None, description="For UI checks: Agent 2's own value, shown but not used")
+
+
+class HostLocate(BaseModel):
+    """How code finds the host executable: a registry value under a product key whose `match_value` matches."""
+
+    registry_root: str = Field(description=r"e.g. 'HKLM:\SOFTWARE\Vendor\Product'; product keys are searched up to 2 levels below")
+    value: str = Field(description="Registry value holding the install folder, e.g. 'InstallLocation'")
+    match_value: str = Field(description="Registry value used to pick the product key, e.g. 'ProductName'")
+    match: str = Field(description="Regular expression the match_value must match")
+
+
+class HostProcess(BaseModel):
+    """`host_process` front matter of a host-notes file: the host facts code needs (LOAD_TESTS_PLAN.md L9)."""
+
+    locate: HostLocate
+    executable: str = Field(description="File name inside the install folder, e.g. 'host.exe'")
+    args: list[str] = Field(default_factory=list, description="Exact launch arguments")
+    processes: list[str] = Field(description="Process image names, e.g. ['host.exe']")
+    main_window: str = Field(description="Regular expression for the host's main window title")
+    new_document: str = Field(description="Regular expression for the title of a new default document")
+    profile_ignore: list[str] = Field(default_factory=list,
+                                      description="Regexes of places the host itself writes to (ignored by UNIN-000)")
+
+
+class JudgeVerdict(str, Enum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+
+
+class Judgement(BaseModel):
+    """The LLM judge's answer for one UI claim (LOAD_TESTS_PLAN.md L20-L25). Strict output schema."""
+
+    verdict: JudgeVerdict = Field(description="PASS, FAIL or NEEDS_REVIEW, by the rule in the judge skill")
+    shown: str = Field(description="What the evidence actually shows about the claim, in plain words")
+    differences: list[str] = Field(description="How the shown UI differs from the claim; empty if it doesn't")
+    findings: list[str] = Field(description="Findings for the report, e.g. a documentation mismatch; may be empty")
+    evidence: list[str] = Field(description="The screenshot or output file(s) the verdict rests on, exactly as listed in the input")
+    reason: str = Field(description="One short paragraph: why this verdict")
+
+
+class JudgedClaim(BaseModel):
+    """One `judged` claim of a test and the judge's answer to it (a FUNC test can have several, F16)."""
+
+    claim: Scalar
+    judgement: Judgement
+
+
+class TestResult(BaseModel):
+    """Verdict for one test, decided by code (verdict engine), written to results.json."""
+
+    __test__ = False  # not a pytest test class
+
+    test_id: str
+    origin: Origin
+    status: Status
+    checks: list[CheckResult]
+    evidence: list[str]
+    notes: str | None
+    judgement: Judgement | None = None  # the last judged claim's answer (LOAD tests have exactly one)
+    judgements: list[JudgedClaim] = []  # every judged claim with its answer, in the test's order
+    findings: list[str] = []
+
+
+class RunResults(BaseModel):
+    """results.json: every verdict of one run plus the counts per status."""
+
+    app: str
+    run_folder: str
+    agent2_finished: bool
+    counts: dict[str, int]
+    results: list[TestResult]

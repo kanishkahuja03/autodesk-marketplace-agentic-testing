@@ -9,12 +9,14 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.15.0",
-    "google-genai>=2.29.0",
     "jinja2>=3.1.6",
+    "openai-agents>=0.23.1",
     "pydantic>=2.14.0",
     "pypdf>=6.19.0",
     "python-docx>=1.2.0",
+    "python-dotenv>=1.2.4",
     "pywin32>=312",
+    "pywinauto>=0.6.9",
     "ruamel-yaml>=0.19.1",
     "typer>=0.27.3",
 ]

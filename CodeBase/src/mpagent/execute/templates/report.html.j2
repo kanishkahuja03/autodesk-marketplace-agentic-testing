@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Validation Report</title>
+<style>
+  :root { --bg:#fff; --fg:#1f2328; --muted:#59636e; --line:#d1d9e0; --card:#f6f8fa;
+          --pass:#1a7f37; --fail:#cf222e; --review:#0969da; --blocked:#9a6700; --error:#8250df; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1; --line:#3d444d; --card:#151b23;
+            --pass:#3fb950; --fail:#f85149; --review:#4493f8; --blocked:#d29922; --error:#ab7df8; } }
+  body { background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, "Segoe UI", sans-serif; margin:0; padding:24px 16px; }
+  main { max-width:1100px; margin:0 auto; }
+  h1 { font-size:24px; margin:0 0 4px; } h2 { font-size:18px; margin:28px 0 8px; }
+  .muted { color:var(--muted); }
+  .counts { display:flex; gap:12px; flex-wrap:wrap; margin:16px 0; }
+  .count { border:1px solid var(--line); background:var(--card); border-radius:8px; padding:8px 16px; min-width:90px; }
+  .count b { display:block; font-size:22px; }
+  table { border-collapse:collapse; width:100%; } th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-weight:600; font-size:13px; color:var(--muted); }
+  .status { font-weight:700; } .PASS { color:var(--pass); } .FAIL { color:var(--fail); } .NEEDS_REVIEW { color:var(--review); } .BLOCKED { color:var(--blocked); } .ERROR { color:var(--error); }
+  details { border:1px solid var(--line); border-radius:8px; margin:8px 0; background:var(--card); }
+  summary { cursor:pointer; padding:8px 12px; } .body { padding:0 12px 12px; }
+  blockquote { margin:6px 0; padding-left:10px; border-left:3px solid var(--line); color:var(--muted); }
+  code { font-size:13px; } img { max-width:320px; border:1px solid var(--line); border-radius:4px; margin:4px 4px 0 0; }
+  .wrap { overflow-x:auto; }
+  .judge { border-left:3px solid var(--review); padding:4px 12px; margin:8px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>{{ plan.app.name }}{% if plan.app.version %} {{ plan.app.version }}{% endif %}</h1>
+  <div class="muted">Host <code>{{ plan.app.host_id }}</code> · Installer {{ plan.app.installer.file }} · Run folder <code>{{ run.run_folder }}</code></div>
+  {% if not run.agent2_finished %}<p class="ERROR"><b>Agent 2 did not finish</b>: tests without an observation are ERROR. See run.log.</p>{% endif %}
+
+  <div class="counts">
+  {% for status, n in run.counts.items() %}<div class="count"><span class="{{ status }}">{{ status }}</span><b>{{ n }}</b></div>{% endfor %}
+  </div>
+
+  <h2>Summary</h2>
+  <div class="wrap"><table>
+    <tr><th>ID</th><th>Category</th><th>Title</th><th>Status</th><th>Origin</th></tr>
+    {% for r in run.results %}{% set t = tests[r.test_id] %}
+    <tr><td><a href="#{{ r.test_id }}">{{ r.test_id }}</a></td><td>{{ t.category.value }}</td><td>{{ t.title }}</td>
+        <td class="status {{ r.status.value }}">{{ r.status.value }}</td><td>{{ r.origin.value }}</td></tr>
+    {% endfor %}
+  </table></div>
+
+  <h2>Details</h2>
+  {% for r in run.results %}{% set t = tests[r.test_id] %}
+  <details id="{{ r.test_id }}" {% if r.status.value != "PASS" %}open{% endif %}>
+    <summary><b>{{ r.test_id }}</b> {{ t.title }} — <span class="status {{ r.status.value }}">{{ r.status.value }}</span></summary>
+    <div class="body">
+      {% if t.source %}<div class="muted">Source {{ t.source.doc }}{% if t.source.line %}:{{ t.source.line }}{% endif %}</div>
+      <blockquote>{{ t.source.quote }}</blockquote>{% else %}<div class="muted">Built-in test ({{ "run by code" if t.steps and t.steps[0].startswith("Built-in check run by code") else "written by code, run by Agent 2" }})</div>{% endif %}
+      {% if t.steps %}<div class="muted">Steps</div><ul>{% for s in t.steps %}<li>{{ s }}</li>{% endfor %}</ul>{% endif %}
+      {% if r.checks %}<div class="wrap"><table>
+        <tr><th>Key</th><th>Check</th><th>Expected</th><th>Observed</th><th></th></tr>
+        {% for c in r.checks %}<tr><td><code>{{ c.key }}</code></td><td>{{ c.check.value }}</td>
+          <td><code>{{ c.expected }}</code></td><td><code>{{ c.observed }}</code>{% if c.check.value == "window_in_ui" %}
+            <div class="muted">decided from the UI tree; Agent 2 said: <code>{{ c.reported }}</code></div>{% elif c.check.value == "judged" %}
+            <div class="muted">Agent 2's description: <code>{{ c.reported }}</code></div>{% endif %}</td>
+          {% if c.ok %}<td class="PASS">✔</td>{% elif c.needs_review %}<td class="NEEDS_REVIEW">?</td>{% else %}<td class="FAIL">✘</td>{% endif %}</tr>{% endfor %}
+      </table></div>{% endif %}
+      {% for jc in r.judgements %}{% set j = jc.judgement %}<div class="judge">
+        <div class="muted">Decided by the LLM judge from the evidence</div>
+        <p><b>Claim:</b> {{ jc.claim }}</p>
+        <p><b>Verdict:</b> <span class="status {{ j.verdict.value }}">{{ j.verdict.value }}</span> — {{ j.reason }}</p>
+        <p><b>Shown:</b> {{ j.shown }}</p>
+        {% if j.differences %}<p><b>Differences:</b></p><ul>{% for d in j.differences %}<li>{{ d }}</li>{% endfor %}</ul>{% endif %}
+        {% if j.findings %}<p><b>Findings:</b></p><ul>{% for f in j.findings %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
+        <div class="muted">Evidence the verdict rests on</div>{% for e in j.evidence %}{% if e.lower().endswith((".png", ".jpg", ".jpeg")) %}<a href="{{ e }}"><img src="{{ e }}" alt="{{ e }}"></a>{% else %}<div><a href="{{ e }}">{{ e }}</a></div>{% endif %}{% endfor %}
+      </div>{% endfor %}
+      {% if r.notes %}<p><span class="muted">Notes:</span> {{ r.notes }}</p>{% endif %}
+      {% if r.evidence %}<div class="muted">Evidence</div>
+        {% for e in r.evidence %}{% if e.lower().endswith((".png", ".jpg", ".jpeg")) %}<a href="{{ e }}"><img src="{{ e }}" alt="{{ e }}"></a>{% else %}<div><a href="{{ e }}">{{ e }}</a></div>{% endif %}{% endfor %}
+      {% endif %}
+    </div>
+  </details>
+  {% endfor %}
+
+  <h2>Findings</h2>
+  <ul>{% for tid, f in findings %}<li><a href="#{{ tid }}">{{ tid }}</a>: {{ f }}</li>{% else %}<li class="muted">none</li>{% endfor %}</ul>
+
+  {% if crashes %}<h2 class="FAIL">The host crashed during this run</h2>
+  <p class="muted">Crash records Windows wrote for the host's processes (<a href="{{ crash_file }}">{{ crash_file }}</a>):</p>
+  <pre class="wrap" style="white-space:pre-wrap">{{ crashes }}</pre>{% endif %}
+
+  <h2>Open questions from the test design</h2>
+  <ul>{% for q in plan.summary.open_questions %}<li>{{ q }}</li>{% else %}<li class="muted">none</li>{% endfor %}</ul>
+  <p class="muted">Verdicts are decided by code from Agent 2's raw observations. Final certification is a human decision.</p>
+</main>
+</body>
+</html>
