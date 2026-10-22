@@ -33,6 +33,7 @@ class Settings:
     agent2_reasoning_effort: str | None = None  # Agent 2's reasoning effort; None = the model's default
     agent2_ui_find_tools: bool = True  # find/click/type UI elements by name, Windows-MCP as fallback (UI_FIND_TOOLS_PLAN.md)
     samples_dir: Path | None = None  # TEMPORARY (POC): the one sample, a file or a folder (F18, Q14)
+    input_files: Path | None = None  # TEMPORARY (POC): a file a feature loads through the app's UI (e.g. a .json)
     # TEMPORARY (until the OpenAI key arrives): Gemini through Google's OpenAI-compatible endpoint.
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-flash-lite-latest"
@@ -100,7 +101,12 @@ def _bool(name: str, default: bool) -> bool:
     raise ConfigError(f"{name} must be true or false, got {raw!r}")
 
 
-REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+def _path(name: str) -> Path | None:
+    raw = os.environ.get(name, "").strip().strip('"')
+    return Path(raw) if raw else None
+
+
+REASONING_EFFORTS =("none", "minimal", "low", "medium", "high", "xhigh", "max")
 
 
 def _effort(name: str) -> str | None:
@@ -131,7 +137,8 @@ def load_settings() -> Settings:
         judge_file_excerpt_chars=_int("JUDGE_FILE_EXCERPT_CHARS", 0) or None,  # 0 or unset: no limit
         agent2_func_min_per_test=_int("AGENT2_FUNC_MIN_PER_TEST", 10),
         agent2_func_turns_per_test=_int("AGENT2_FUNC_TURNS_PER_TEST", 40),
-        samples_dir=Path(os.environ["SAMPLES_DIR"].strip().strip('"')) if os.environ.get("SAMPLES_DIR", "").strip() else None,
+        samples_dir=_path("SAMPLES_DIR"),
+        input_files=_path("INPUT_FILES"),
         gemini_api_key=os.environ.get("GEMINI_API_KEY") or None,
         gemini_model=os.environ.get("GEMINI_MODEL") or "gemini-flash-lite-latest",
     )

@@ -15,7 +15,7 @@ from ruamel.yaml import YAML
 
 from mpagent.config import PROJECT_ROOT, Settings
 from mpagent.design.evidence import Source, build_sources, render_pack
-from mpagent.design.samples import Sample, render_samples
+from mpagent.design.samples import Sample, render_input_files, render_samples
 from mpagent.design.selfcheck import (
     BUILT_IN_ENV_ID,
     BUILT_IN_LOAD_ID,
@@ -76,14 +76,16 @@ def openai_ask(settings: Settings) -> AskFn:
 
 
 def design_tests(run_dir: Path, manifest: IntakeManifest, facts: InstallerFacts, ask: AskFn,
-                 samples: list[Sample] = ()) -> TestPlan:
+                 samples: list[Sample] = (), inputs: list[Sample] = ()) -> TestPlan:
     """Run Agent 1 with self-check retries, add ENV-000 and write the outputs. Returns the final plan.
-    `samples`: the samples folder's listing (FUNC_TESTS_PLAN.md F18); feature cards may name these."""
+    `samples`: the samples folder's listing (FUNC_TESTS_PLAN.md F18); `inputs`: the input files' listing.
+    Feature cards may name these."""
     trace = Trace(run_dir)
     sources = build_sources(run_dir, manifest, facts)
     host_ids = host_catalogue().keys()
     load_hosts = [h for h in host_ids if host_process(h)]
-    conversation: str | list = render_pack(sources) + "\n\n" + render_samples(list(samples))
+    conversation: str | list = (render_pack(sources) + "\n\n" + render_samples(list(samples)) + "\n\n"
+                                + render_input_files(list(inputs)))
 
     plan: TestPlan | None = None
     errors: list[str] = []
@@ -96,7 +98,7 @@ def design_tests(run_dir: Path, manifest: IntakeManifest, facts: InstallerFacts,
             raise Agent1Error(f"LLM call failed: {type(e).__name__}: {e}") from e
         trace.write("agent1_response", attempt=attempt, plan=plan.model_dump(mode="json"))
 
-        errors = check_plan(plan, sources, host_ids, load_hosts, [s.name for s in samples])
+        errors = check_plan(plan, sources, host_ids, load_hosts, [s.name for s in samples], [s.name for s in inputs])
         trace.write("agent1_selfcheck", attempt=attempt, errors=errors)
         if not errors:
             log.info("Agent 1 attempt %d: self-check passed", attempt)

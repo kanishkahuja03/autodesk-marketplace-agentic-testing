@@ -295,6 +295,26 @@ def test_feature_card_quotes_and_sample_are_checked():
                for e in func_errors(samples=()))
 
 
+def test_feature_card_input_file_is_checked_against_the_listing():
+    def with_input(d):
+        _card(d)["input_file"] = "export.json"
+    assert any("input_file 'export.json' is not in the input files listing (none are available)" in e
+               for e in func_errors(with_input))
+    data = copy.deepcopy(func_plan_data())
+    with_input(data)
+    assert check_plan(TestPlan.model_validate(data), FUNC_SOURCES, HOSTS, ("autocad-plant3d",), ("SampleProject",),
+                      ("export.json",)) == []
+
+
+def test_input_files_are_listed_in_their_own_block(tmp_path):
+    from mpagent.design.samples import list_samples, render_input_files
+
+    (tmp_path / "export.json").write_bytes(b"{}")
+    text = render_input_files(list_samples(tmp_path / "export.json"))
+    assert text.startswith("<input_files>\n") and '<input_file name="export.json" kind="file" files="1"' in text
+    assert "No input files are available" in render_input_files([])
+
+
 def test_testable_card_needs_its_test_and_untestable_card_a_reason():
     assert any("test_id must name the FUNC test" in e for e in func_errors(lambda d: _card(d).update(test_id=None)))
 

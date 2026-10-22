@@ -19,6 +19,8 @@ host_process:
   processes: [Revit.exe]
   main_window: '^Autodesk Revit \d{4}.* - \['  # '... - [Home]' or '... - [<file> - <view>]'; not the splash
   new_document: 'Project\d+'
+  profile_ignore:  # places Revit itself writes to (UNIN-000 ignores them)
+    - '\\ProgramData\\Autodesk\\AdlmAdlSdk-RVT\d{4}[^\\]*\.log$'  # Autodesk licensing log, one per Revit session
 navigation: navigation/revit-navigation.md  # host-only navigation guidance for Agent 2
 navigation_steps: navigation/revit-navigation-steps.md  # the same, as steps for the find-by-name UI tools
 ---

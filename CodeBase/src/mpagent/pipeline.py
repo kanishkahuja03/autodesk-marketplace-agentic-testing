@@ -243,7 +243,9 @@ def _design_side(input_dir: Path, runs_dir: Path, settings: Settings, agent1_ask
         ask = agent1_ask or openai_ask(settings)
         samples = list_samples(settings.samples_dir)
         log.info("  samples: %s", ", ".join(s.name for s in samples) or "none (SAMPLES_DIR not set or empty)")
-        plan = design_tests(run_dir, manifest, facts, ask, samples)
+        inputs = list_samples(settings.input_files)
+        log.info("  input files: %s", ", ".join(s.name for s in inputs) or "none (INPUT_FILES not set or empty)")
+        plan = design_tests(run_dir, manifest, facts, ask, samples, inputs)
     except ConfigError as e:
         raise PipelineStopped(f"Agent 1 can't start: {e}") from e
     except Agent1Error as e:

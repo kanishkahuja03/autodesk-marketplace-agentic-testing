@@ -278,7 +278,8 @@ def run_agent2(plan: TestPlan, run_dir: Path, installer_path: Path, settings: Se
     # msiexec can't open its log in a missing folder and then aborts at once (run 20261012-191028)
     (run_dir / "evidence").mkdir(exist_ok=True)
     card = sample_card(plan)
-    func = func_block(prepare_func_tests(plan, run_dir, settings.samples_dir), card.sample if card else None)
+    func = func_block(prepare_func_tests(plan, run_dir, settings.samples_dir, settings.input_files),
+                      card.sample if card else None)
     minutes, turns = limits(plan, settings)
     try:
         out = asyncio.run(asyncio.wait_for(_run(plan, run_dir, installer_path, settings, facts, func, turns),

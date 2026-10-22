@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
@@ -266,13 +267,16 @@ def extract_from_cabinet(db: MsiDatabase, msi_path: Path, media_rows, file_rows,
         if cab:
             wanted.setdefault(cab, []).append(f)
 
-    cab_dir = out_dir / "_cabinets"
-    cab_dir.mkdir(parents=True, exist_ok=True)
     # Always Windows' own expand.exe: with Git's tools on PATH, `which` finds Git's unrelated text tool
     # of the same name, and every file failed to unpack
     expand = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "expand.exe"
     extracted: dict[str, Path] = {}
-    try:
+    # expand.exe names each file after its File key, which can be ~100 characters (P&ID Importer 1.0.6 MSI):
+    # unpack in a short temp folder, so the path stays under Windows' 260 limit, then move with short names
+    with tempfile.TemporaryDirectory(prefix="mpx") as tmp:
+        cab_dir, raw_dir = Path(tmp) / "c", Path(tmp) / "x"
+        cab_dir.mkdir()
+        raw_dir.mkdir()
         for cab, files in wanted.items():
             if cab.startswith("#"):
                 cab_path = cab_dir / cab[1:]
@@ -281,13 +285,11 @@ def extract_from_cabinet(db: MsiDatabase, msi_path: Path, media_rows, file_rows,
                 cab_path = msi_path.parent / cab
                 if not cab_path.exists():
                     continue
-            out_dir.mkdir(parents=True, exist_ok=True)
-            before = {p.name for p in out_dir.iterdir()}
             # many files: one call for the whole cabinet (one call per file took ~1 s each)
             patterns = ["*"] if len(files) > 5 else [f["File"] for f in files]
             for pattern in patterns:
                 subprocess.run(
-                    [str(expand), str(cab_path), f"-F:{pattern}", str(out_dir)],
+                    [str(expand), str(cab_path), f"-F:{pattern}", str(raw_dir)],
                     capture_output=True,
                     text=True,
                     timeout=300,
@@ -295,20 +297,17 @@ def extract_from_cabinet(db: MsiDatabase, msi_path: Path, media_rows, file_rows,
                 )
             for f in files:
                 key = f["File"]
-                raw = out_dir / key
+                raw = raw_dir / key
                 if raw.exists():
+                    out_dir.mkdir(parents=True, exist_ok=True)
                     final = out_dir / long_name(f["FileName"])
-                    if final.exists():  # same long name in two folders: keep both
-                        final = out_dir / f"{key}_{long_name(f['FileName'])}"
-                    raw.replace(final)
+                    n = 1
+                    while final.exists():  # same long name in two folders: keep both
+                        n += 1
+                        final = out_dir / f"{n}_{long_name(f['FileName'])}"
+                    shutil.move(raw, final)
                     extracted[key] = final
-            keep = before | {p.name for p in extracted.values()}
-            for leftover in out_dir.iterdir():  # files of the cabinet nobody asked for
-                if leftover.is_file() and leftover.name not in keep:
-                    leftover.unlink()
-    finally:
-        shutil.rmtree(cab_dir, ignore_errors=True)
-    return extracted
+    return extracted  # files of the cabinet nobody asked for went with the temp folder
 
 
 def read_msi(msi_path: Path, run_dir: Path, facts: InstallerFacts) -> None:

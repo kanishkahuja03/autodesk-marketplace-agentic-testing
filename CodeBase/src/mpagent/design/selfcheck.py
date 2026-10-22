@@ -44,9 +44,11 @@ def normalise(text: str) -> str:
 
 
 def check_plan(plan: TestPlan, sources: list[Source], host_ids: Iterable[str],
-               load_hosts: Iterable[str] = (), sample_names: Iterable[str] = ()) -> list[str]:
+               load_hosts: Iterable[str] = (), sample_names: Iterable[str] = (),
+               input_names: Iterable[str] = ()) -> list[str]:
     """`load_hosts`: host_ids whose host notes have host_process (only those get LOAD and FUNC tests).
-    `sample_names`: the samples feature cards may name (FUNC_TESTS_PLAN.md F18)."""
+    `sample_names`: the samples feature cards may name (FUNC_TESTS_PLAN.md F18); `input_names`: the same for
+    input files."""
     errors: list[str] = []
     texts = {s.id: normalise(s.text) for s in sources}
 
@@ -101,7 +103,7 @@ def check_plan(plan: TestPlan, sources: list[Source], host_ids: Iterable[str],
 
     load_host = host in set(load_hosts)
     _check_load(plan, load_host, errors, check_citation)
-    _check_func(plan, load_host, set(sample_names), errors, check_citation)
+    _check_func(plan, load_host, set(sample_names), errors, check_citation, set(input_names))
 
     # preconditions: known ids, no cycles
     known = set(ids) | {BUILT_IN_ENV_ID} | ({BUILT_IN_LOAD_ID} if load_host else set())
@@ -203,7 +205,8 @@ def _check_load(plan: TestPlan, load_host: bool, errors: list[str], check_citati
                               "or summary.entry_point.sources); copy names exactly from a source")
 
 
-def _check_func(plan: TestPlan, load_host: bool, sample_names: set[str], errors: list[str], check_citation) -> None:
+def _check_func(plan: TestPlan, load_host: bool, sample_names: set[str], errors: list[str], check_citation,
+                input_names: set[str] = frozenset()) -> None:
     """FUNC rules (FUNC_TESTS_PLAN.md F1, F8, F13, F14, F16, §4.1): one feature card per documented feature; one
     FUNC test per testable card, with one `judged` claim per documented result; the tests in class order."""
     func_tests = [t for t in plan.testcases if t.category is Category.FUNC]
@@ -219,6 +222,10 @@ def _check_func(plan: TestPlan, load_host: bool, sample_names: set[str], errors:
             known = ", ".join(sorted(sample_names)) or "none are available"
             errors.append(f"{where}: sample {card.sample!r} is not in the samples listing ({known}); use a listed "
                           "name or null")
+        if card.input_file is not None and card.input_file not in input_names:
+            known = ", ".join(sorted(input_names)) or "none are available"
+            errors.append(f"{where}: input_file {card.input_file!r} is not in the input files listing ({known}); use "
+                          "a listed name or null")
         if card.testable:
             if card.action_class > 2:
                 errors.append(f"{where}: a feature that needs class 3 (lasting) actions is not testable; set testable "

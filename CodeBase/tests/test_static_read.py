@@ -81,3 +81,13 @@ def test_real_pid_exporter_msi(tmp_path):
     assert facts.bundles and facts.bundles[0].runtime_requirements[0].platform == "Plant3D"
     assert any(d.name == "Help.html" for d in facts.embedded_documents)
     assert any("EntitlementApiWrapper.dll" in n for n in facts.notable_files)
+
+
+def test_real_pid_importer_msi_with_long_file_keys(tmp_path):
+    # the same DLLs for Revit 2021-2027 and ~100-character File keys: renaming a duplicate after its key
+    # passed Windows' 260-character path limit and S1 crashed
+    _, run_dir = run_intake(REAL_PLUGIN.parent / "pid-connector-importer", tmp_path / "runs")
+    facts = run_static_read(run_dir)
+    assert facts.properties["ProductCode"] == "{340D7979-E823-4954-A8CE-978143CAC161}"
+    assert facts.bundles and facts.ui_text is not None
+    assert not any("could not unpack" in w for w in facts.warnings)
