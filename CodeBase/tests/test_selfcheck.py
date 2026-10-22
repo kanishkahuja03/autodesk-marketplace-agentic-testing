@@ -88,7 +88,7 @@ def test_expectation_rules():
 
 
 def test_host_rules():
-    assert any("not in the catalogue" in e for e in errors_for(changed(lambda d: d["app"].update(host_id="revit"))))
+    assert any("not in the catalogue" in e for e in errors_for(changed(lambda d: d["app"].update(host_id="no-such-host"))))
     assert any("host_evidence is empty" in e for e in errors_for(changed(lambda d: d["app"].update(host_evidence=[]))))
     unknown = changed(lambda d: d["app"].update(host_id="unknown", host_evidence=[]))
     assert any("'unknown' but summary.open_questions" in e for e in errors_for(unknown))

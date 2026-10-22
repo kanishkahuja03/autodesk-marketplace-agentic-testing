@@ -16,7 +16,7 @@ We build a **generic** two-agent pipeline that takes an app's **documentation an
 
 The goal **now** is a **demo POC with minimal development effort**, built from ready-made parts (OpenAI Agents SDK, Windows-MCP, existing libraries). Cost is not a concern. **The whole pipeline runs with one press of the Visual Studio Run button (F5).**
 
-**Generic means:** nothing in the core is tied to Autodesk or any other vendor. Product-specific knowledge lives in **host notes** (Markdown skill files). AutoCAD Plant 3D 2027 is just the first host, and the **P&ID Connector Exporter** is the demo app.
+**Generic means:** nothing in the core is tied to Autodesk or any other vendor. Product-specific knowledge lives in **host notes** (Markdown skill files). AutoCAD Plant 3D 2027 is just the first host, and the **P&ID Connector Exporter** is the demo app. **Revit 2027** is the second host, with **Tiny Tools** as its demo app (D68).
 
 ---
 
@@ -116,6 +116,14 @@ Details and reasoning: [`LOAD_TESTS_PLAN.md`](LOAD_TESTS_PLAN.md) §9 (L20–L26
 | D65 | Covered or cut-off UI | Agent 2 makes the claimed UI visible with **view-only changes, smallest first** (maximize, expand, scroll, move/collapse/auto-hide a covering panel; close a panel only if it isn't part of the test and can be reopened), undoes them and notes them, and checks that its screenshots show every element the claim names. The judge: **hidden is not missing**, a covered element is NEEDS_REVIEW, never FAIL. *(Run 20261014-153924: the Project Manager palette covered most of the ribbon.)* A clean host profile per run is a later option. |
 | D66 | The judge's own client | The judge runs every call in its own event loop with its own OpenAI client (`Settings.fresh_model()`). The SDK's shared client stayed tied to Agent 2's closed `asyncio.run()` loop (run 20261014-153924: `Event loop is closed`). |
 | D67 | Generic skills, host knowledge as data | **The skills contain principles only, no host or app knowledge.** A host profile (`skills/hosts/<id>.md`) is **front matter only**: `host_process` (D43) and an optional `releases` table (host version ↔ the release numbers manifests use). Its prose (recognition hints, registry recipes, start-page and dialog examples, Ctrl+N/template hints, ribbon notes) was removed; Agent 1 recognises the host from the app's own manifest and documents, and Agent 2 handles the host UI from generic principles (D56, D62, D65). A test (`test_skills`) rejects host or app names in skill prose. *(Experiment 2026-10-14: run 20261014-175347 with generic skills gave the same 14 PASS and the same findings as the case-tuned run 20261014-162644, in 5.2 instead of 7.2 Agent 2 minutes. Needs `OPENAI_MODEL=gpt-5.5`-class models; gpt-4o-mini failed even with the case-tuned skills.)* |
+
+### 2.6 Second host: Revit 2027 (D68, grill-me review of REVIT_EXTENSION_PLAN.md, 2026-10-21)
+
+| # | Topic | Decision |
+|---|---|---|
+| D68 | Revit as host data | **Revit 2027** is added as data, as Plant 3D was:<br>- `skills/hosts/revit.md` (front matter only, D67)<br>- `navigation/revit-navigation.md` and `navigation/revit-navigation-steps.md`<br><br>**Demo app:** Tiny Tools (Archilizer). **Backup:** ElementRenumbering.<br>- **Samples:** one `SAMPLES_DIR`, switched by the user.<br>- **Unsigned-add-in prompt:** Agent 2 clicks **Load Once** (D56). It is recorded as `load_prompt_seen` and as an observation, not a FAIL.<br>- **LOAD-000:** unchanged.<br>- **Genericity test:** `revit` becomes a host word; the app names stay banned.<br>- **Only for a non-bundle installer:** `.addin` files as raw evidence, and `install_root()` keeps the file's parent folder.<br><br>The profile values are probed on the machine after install. *(ADR-048)* |
+| D69 | Name tools for large UI trees | `find_ui` / `click_ui` / `type_ui` match names **ignoring whitespace**: two-line ribbon labels carry a line break in their name. They search for the name's longest word and filter by the whole name. The time limit per search is **30 s** (was 15 s), because one Revit search takes 12–26 s. *(ADR-049, amends ADR-047)* |
+| D70 | `wait_for_host`: code watches, Agent 2 decides | A fourth name tool watches the host's windows (every 0.5 s). It returns as soon as a new dialog opens (title, buttons, text), the main window is ready (enabled, unchanged for 2 s), a dialog blocks it, or the host closes. Agent 2 uses it after starting the host and after any action that may open a window, instead of `WaitFor` or a screenshot taken just to check. `click_ui` clicks a just-reported button at its place (no search), and searches dialogs before the main window. It never clicks by itself and has no list of dialogs. *(ADR-050)* |
 
 **Agent 2 resolves placeholders** (`${PLUGIN_DIR}` etc.) during its ENV tests and returns them in its final output.
 
@@ -353,12 +361,14 @@ env: [{ key: HOST_INSTALL_DIR, value: 'C:\Program Files\Autodesk\AutoCAD 2027' }
 |---|---|---|
 | `skills/test-design/SKILL.md` | Agent 1 | The categories and what each must cover; the basic coverage required by D24 with the suggested key names (`install_exit_code`, `uninstall_entry_exists`); citation format; placeholders; `observe` / `expected` rules and allowed checks; preconditions; "never guess"; "test the plug-in, not the host"; "ENV-000 is built in, don't write it"; LOAD: the entry-point card, LOAD-001 only for visible kinds, `seen_in_ui`, "LOAD-000 is built in" (D41, D42) |
 | `skills/hosts/autocad-plant3d.md` | Agents 1 + 2 (catalogue), code | **Front matter only (D67):** `host_process` (how code finds, starts and recognises the host) and `releases` (2024 = R24.3 … 2027 = R26.0). No prose. |
+| `skills/hosts/revit.md` | Agents 1 + 2 (catalogue), code | **Front matter only (D67, D68):** `host_process` for Revit 2027, `releases`, and the paths of its `navigation` / `navigation_steps` files |
+| `skills/hosts/navigation/revit-navigation*.md` | Agent 2 | The Revit UI only, never an app (D68): Home screen, opening an `.rvt`, Project Browser, ribbon tabs, the unsigned-add-in prompt (Load Once), closing without saving |
 | `skills/hosts/none.md` | Agents 1 + 2 | Standalone Windows app: Program Files, Start menu, Programs & Features only |
 | `skills/execute/windows-installer.md` | Agent 2 | Allowed PowerShell commands (D32); read-only file rules and the 50 KB / 20,000-character limits (D33, D37); silent install and **silent uninstall** with logs, exit codes read from the logs (D26, D27); the three Uninstall registry paths; signature check; generic UI rules (full paths only, no Win+R, no guessed coordinates, never touch the console) |
 | `skills/execute/evidence.md` | Agent 2 | Call `record_observation` after every test; raw values only; reference saved screenshots and logs; untrusted-text rule; read-only rule; run every test |
 | `skills/execute/host-interaction.md` | Agent 2 | Generic LOAD principles (D67): order, start exactly as given, decide on anything that appears (smallest lasting effect, document it), a new empty document "the way this host offers it", reveal never act, make it visible and undo, screenshot every claimed element, kill the host before UNIN |
 
-A new host means **one new Markdown file**, with no code change.
+A new host means **a host profile plus its navigation files**, with no code change, as long as the plug-in installs as a `.bundle` with a `PackageContents.xml`. A bare `.addin` installer needs the conditional static-read change in D68.
 
 ---
 

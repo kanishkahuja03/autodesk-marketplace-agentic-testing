@@ -248,7 +248,7 @@ async def _run(plan: TestPlan, run_dir: Path, installer_path: Path, settings: Se
     guard = tool_guardrail(run_dir, trace, policy=policy)
     server = windows_mcp_server(settings, recorder, [guard])
     ui_find = settings.agent2_ui_find_tools and host is not None
-    finder = UiFinder(host.processes, trace) if ui_find else None
+    finder = UiFinder(host.processes, trace, main_window=host.main_window) if ui_find else None
     observations = ObservationRecorder(run_dir, plan, recorder, trace, policy,
                                        window_titles=finder.window_titles if finder else None)
     tools = [make_record_observation(observations)]

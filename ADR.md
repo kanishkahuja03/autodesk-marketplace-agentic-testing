@@ -75,3 +75,31 @@ Source of truth: [`ARCHITECTURE.md`](ARCHITECTURE.md) (V2.3, 2026-10-13). If an 
 - **ADR-045 Covered UI and the judge's client:** Agent 2 uncovers the claimed UI with view-only, undone changes; the judge treats covered elements as NEEDS_REVIEW ("hidden is not missing"). The judge uses its own OpenAI client and event loop per call. *(D65, D66)*
 - **ADR-046 Generic skills, host knowledge as data:** skills hold principles only; a host profile is front matter only (`host_process`, `releases`). Run 20261014-175347 with generic skills matched the case-tuned run (14 PASS, same findings, faster). Requires a strong model (gpt-5.5 class). *(D67)*
 - **ADR-047 Find-by-name UI tools (amends ADR-005):** besides Windows-MCP, Agent 2 has three local tools, `find_ui`, `click_ui` and `type_ui`, that find an element of the **host's windows** by its name through Windows UI Automation (exact name first, then "contains"; the first match is used) and click it or type into it. Same protection as MCP calls: host windows only, the same call at most 3 times, every call traced (`ui_find_call`). Windows-MCP stays the fallback (not found, not in the UI tree, errors). Switch `AGENT2_UI_FIND_TOOLS` (on; `false` = the behaviour before). Host step sequences come from the host profile's `navigation_steps:` file. Reason: Snapshots took ~46 s each (run 20261016-172639). *(UI_FIND_TOOLS_PLAN.md, built 2026-10-19)*
+
+### Decisions from the Revit grill-me review (2026-10-21)
+- **ADR-048 Revit, a second host as data:** Revit 2027 joins as the second host through a host profile (`skills/hosts/revit.md`, front matter only) and its two navigation files. Demo app: **Tiny Tools** (Archilizer; free, no login or licence per its listing), with **ElementRenumbering** as backup. The user checks by hand that neither needs any sign-in or other dependency before the build. Decisions:
+  - **Samples:** one global `SAMPLES_DIR`. The user points it at the sample of the host under test. Agent 1 sees the sample card and must notice a host mismatch; no code.
+  - **"Security – Unsigned Add-in" prompt:** navigation guidance only. Agent 2 clicks **Load Once**, never "Always Load", because "Always Load" leaves a lasting trust entry that UNIN-000 would report. The prompt is recorded as `load_prompt_seen` and as an observation in the report, not a FAIL. A signing check written by Agent 1 may FAIL on its own; it doesn't block LOAD-000, which depends only on INST tests that observe `install_exit_code`. Fits ADR-039.
+  - **LOAD-000:** no code change. The navigation file describes Revit's "new document" (New → Project, default template); `new_document` is a title regex set after probing.
+  - **Genericity tests:** `revit` moves from the navigation files' banned app words to a host word. The apps under test (`tiny tools|archilizer|renumber`) are banned instead. Generic skill prose stays strict.
+  - **Conditional (only if the installer is not a `.bundle`):** `.addin` manifests are unpacked as raw evidence for Agent 1 (no Revit parser), and `install_root()` keeps the file's parent folder, so a leftover `Addins\<year>\x.addin` is within UNIN-000's depth. A bundle install needs neither.
+  - **No change:** `BundleComponent.load_on_startup` keeps reading the AutoCAD-named attribute; it stays empty for Revit.
+  - **Inputs:** `inputs/<app>/` holds the installer, the user-written `Description.txt` and the downloaded `UserGuide.html`.
+
+  Registry locate, window titles and how much of the ribbon UI Automation can see are probed on the machine after Revit 2027 is installed. *(D68; REVIT_EXTENSION_PLAN.md)*
+- **ADR-049 Name tools for large UI trees (amends ADR-047):** the probe of Revit 2027 (2026-10-21) found two generic gaps:
+  - A ribbon label shown on two lines has a line break in its UI Automation name (`Duplicate⏎Views`). The tools now ask UI Automation for the name's **longest word**, then keep only the elements whose name contains the whole name, **ignoring case and whitespace**. Exact matches still come first.
+  - One search over the Revit window takes 12–26 s, so the time limit per search is raised from **15 to 30 s** (`SEARCH_TIMEOUT_S`).
+
+  Plant 3D is unaffected: the same matches in the same order, and its searches finish well within the limit. *(D69; REVIT_EXTENSION_PLAN.md §10)*
+- **ADR-050 Code watches, Agent 2 decides (`wait_for_host`, amends ADR-047):** in run 20261022-101233, `WaitFor "Autodesk Revit"` matched the splash screen. Agent 2 then reasoned about a screenshot of it for more than 3 minutes, while the add-in's load prompt waited unanswered. A fourth name tool, `wait_for_host(timeout_s)`, now watches the host's windows twice a second and returns **the moment**:
+  - a new window with its own buttons opens (a dialog: title, buttons, text);
+  - the main window (the profile's `main_window`) is enabled and unchanged for 2 s;
+  - a dialog blocks a main window that isn't ready;
+  - or the host closes.
+
+  It never clicks and needs no list of dialogs: Agent 2 still decides every dialog (ADR-039). Speed details:
+  - dialogs are read in one cached UI Automation call, and title-bar buttons don't count;
+  - `click_ui` searches dialogs before the main window, and clicks a button `wait_for_host` just reported (≤ 60 s) at its reported place, with no new search.
+
+  Live check on Revit 2027 (2026-10-22): the load prompt was reported about 11 s after it appeared, the click took 0.4 s (11–31 s before), and "ready" came as soon as the main window was enabled. Revit's profile `main_window` now requires ` - [`, so the splash is not the main window. *(D70)*
