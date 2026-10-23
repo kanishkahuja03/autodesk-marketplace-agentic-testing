@@ -31,6 +31,7 @@ class Settings:
     agent2_func_min_per_test: int = 10  # time allowance per FUNC test, added to agent2_timeout_min (F15)
     agent2_func_turns_per_test: int = 40  # turn allowance per FUNC test, added to agent2_max_turns (F15)
     agent2_reasoning_effort: str | None = None  # Agent 2's reasoning effort; None = the model's default
+    agent2_keep_screenshots: int = 3  # images of the last N tool results the model still sees; 0 = all
     agent2_ui_find_tools: bool = True  # find/click/type UI elements by name, Windows-MCP as fallback (UI_FIND_TOOLS_PLAN.md)
     samples_dir: Path | None = None  # TEMPORARY (POC): the one sample, a file or a folder (F18, Q14)
     input_files: Path | None = None  # TEMPORARY (POC): a file a feature loads through the app's UI (e.g. a .json)
@@ -134,6 +135,7 @@ def load_settings() -> Settings:
         judge_max_images=_int("JUDGE_MAX_IMAGES", 6),
         agent2_ui_find_tools=_bool("AGENT2_UI_FIND_TOOLS", True),
         agent2_reasoning_effort=_effort("AGENT2_REASONING_EFFORT"),
+        agent2_keep_screenshots=_int("AGENT2_KEEP_SCREENSHOTS", 3),
         judge_file_excerpt_chars=_int("JUDGE_FILE_EXCERPT_CHARS", 0) or None,  # 0 or unset: no limit
         agent2_func_min_per_test=_int("AGENT2_FUNC_MIN_PER_TEST", 10),
         agent2_func_turns_per_test=_int("AGENT2_FUNC_TURNS_PER_TEST", 40),

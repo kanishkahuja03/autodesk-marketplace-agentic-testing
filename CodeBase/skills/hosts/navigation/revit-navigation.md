@@ -44,12 +44,21 @@ This file only tells you **where things are in the host** and the fastest way to
 - The host's open and save dialogs have a **file name** box. Type the **full path** (folder and file name) there and confirm; this is faster than browsing folders.
 - When a save or export dialog proposes a folder outside the run folder, replace it by typing the full path into the test's output folder.
 
-## 7. Changes in the model, closing
-- A feature that changes the model (new or renamed views or sheets) changes only the open copy in the run folder, as long as it is **not saved**. Never press **Ctrl+S** or use **Save** / **Save As** on a model you didn't create in the run folder.
+## 7. Model elements: seeing, picking, reading their parameters
+- **The drawing area is not in the UI tree**; elements in it are found only on a Screenshot and clicked by their coordinates.
+- **A 3D view** shows all model elements: **View** tab → **3D View** → **Default 3D View** (or the house icon in the Quick Access Toolbar at the top). Opening a view is class 1. In a plan view, elements of other levels or disciplines may not be visible.
+- **Zoom** with the mouse wheel over the drawing area, or type **ZF** (zoom to fit) while the drawing area has focus: class 0. Don't change **Visibility/Graphics** (VV) or the view's properties: that changes the view in the model.
+- **Hovering** over an element highlights it and shows a tooltip with its category, family and type. Where elements overlap, **Tab** cycles the highlight between them; a click then selects the highlighted one.
+- **When a command asks you to pick an element**, the prompt is in the **status bar** at the bottom left of the main window (e.g. "Select an element …"). Click the element in the drawing area; **Esc** cancels the pick. Pick an element whose category fits what the command is for.
+- **Selecting** an element (a click, class 0) shows its parameters in the **Properties** palette, usually docked at the left above the Project Browser: at its top the type, below it the instance parameters in groups (e.g. **Identity Data**, **Constraints**, **Dimensions**). Scroll the palette to reach a group; take a Screenshot to read values. If the palette is hidden: **View** tab → **User Interface** → **Properties**. **Edit Type** shows the type's parameters; close it with **Cancel**.
+- **Esc** (once or twice) clears the selection.
+
+## 8. Changes in the model, closing
+- A feature that changes the model (new or renamed views or sheets, new or changed parameter values) changes only the open copy in the run folder, as long as it is **not saved**. Never press **Ctrl+S** or use **Save** / **Save As** on a model you didn't create in the run folder.
 - **Ctrl+Z** undoes the last change in the model (class 2); use it only where the host-interaction skill asks you to undo.
 - Closing the host asks to save changed models: answer **No**. At the end of the tests the host is killed anyway (host-interaction skill).
 
-## 8. Saving time
+## 9. Saving time
 - The host's UI tree is large: each search takes several seconds. Use the Project Browser's **Search** box or filter buttons instead of scrolling through long lists.
 - Use a Screenshot for the Home screen and the drawing area (neither is in the UI tree).
 - After opening a model or a view, one short `Wait` (3–5 seconds) is usually enough before the next look.

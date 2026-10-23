@@ -98,7 +98,8 @@ def design_tests(run_dir: Path, manifest: IntakeManifest, facts: InstallerFacts,
             raise Agent1Error(f"LLM call failed: {type(e).__name__}: {e}") from e
         trace.write("agent1_response", attempt=attempt, plan=plan.model_dump(mode="json"))
 
-        errors = check_plan(plan, sources, host_ids, load_hosts, [s.name for s in samples], [s.name for s in inputs])
+        errors = check_plan(plan, sources, host_ids, load_hosts, [s.name for s in samples], [s.name for s in inputs],
+                            facts)
         trace.write("agent1_selfcheck", attempt=attempt, errors=errors)
         if not errors:
             log.info("Agent 1 attempt %d: self-check passed", attempt)

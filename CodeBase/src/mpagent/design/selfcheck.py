@@ -8,6 +8,7 @@ import re
 from collections.abc import Iterable
 
 from mpagent.design.evidence import Source
+from mpagent.hostnotes import host_releases
 from mpagent.models import (
     UI_CHECKS,
     VISIBLE_ENTRY_POINTS,
@@ -15,6 +16,7 @@ from mpagent.models import (
     Check,
     Citation,
     FeatureCard,
+    InstallerFacts,
     Origin,
     TestCase,
     TestPlan,
@@ -45,10 +47,10 @@ def normalise(text: str) -> str:
 
 def check_plan(plan: TestPlan, sources: list[Source], host_ids: Iterable[str],
                load_hosts: Iterable[str] = (), sample_names: Iterable[str] = (),
-               input_names: Iterable[str] = ()) -> list[str]:
+               input_names: Iterable[str] = (), facts: InstallerFacts | None = None) -> list[str]:
     """`load_hosts`: host_ids whose host notes have host_process (only those get LOAD and FUNC tests).
     `sample_names`: the samples feature cards may name (FUNC_TESTS_PLAN.md F18); `input_names`: the same for
-    input files."""
+    input files. `facts`: the installer facts, for the host versions the plug-in's manifest supports."""
     errors: list[str] = []
     texts = {s.id: normalise(s.text) for s in sources}
 
@@ -100,6 +102,9 @@ def check_plan(plan: TestPlan, sources: list[Source], host_ids: Iterable[str],
         for text in texts_of(t):
             if USER_PROFILE_PATH.search(text):
                 errors.append(f"{t.id}: hard-coded user profile path {text!r}; use a placeholder or %AppData%")
+
+    if facts is not None and host in host_ids:
+        _check_host_versions(plan, supported_host_versions(facts, host_releases(host)), errors)
 
     load_host = host in set(load_hosts)
     _check_load(plan, load_host, errors, check_citation)
@@ -203,6 +208,49 @@ def _check_load(plan: TestPlan, load_host: bool, errors: list[str], check_citati
             if normalise(name) not in support:
                 errors.append(f"{t.id}: the claim names {name!r}, which is in none of its quotes (the test's source "
                               "or summary.entry_point.sources); copy names exactly from a source")
+
+
+RELEASE_NUMBER = re.compile(r"^R?(\d+(?:\.\d+)*)$", re.IGNORECASE)
+
+
+def _release_key(release: str | None) -> tuple[int, ...] | None:
+    m = RELEASE_NUMBER.match((release or "").strip())
+    return tuple(int(p) for p in m.group(1).split(".")) if m else None
+
+
+def supported_host_versions(facts: InstallerFacts, releases: dict[str, str]) -> list[str]:
+    """Host versions the plug-in's manifest(s) support: every runtime requirement range together, the package's
+    and each component entry's (run 20261022-133504: the package said R2022-R2026, a component entry R2027),
+    mapped with the host profile's releases table. A range without a minimum, or in another host's
+    numbering, adds nothing; a range without a maximum is open-ended."""
+    keyed = [(v, k) for v, k in ((v, _release_key(r)) for v, r in releases.items()) if k is not None]
+    found: set[str] = set()
+    for b in facts.bundles:
+        for rr in b.runtime_requirements:
+            low, high = _release_key(rr.series_min), _release_key(rr.series_max)
+            if low is None:
+                continue
+            found.update(v for v, k in keyed if low <= k and (high is None or k <= high))
+    return sorted(found, key=lambda v: _release_key(releases[v]))
+
+
+def _check_host_versions(plan: TestPlan, supported: list[str], errors: list[str]) -> None:
+    """An ENV test that checks host_version against a list must accept every version the manifest supports."""
+    if not supported:
+        return
+    for t in plan.testcases:
+        if t.category is not Category.ENV:
+            continue
+        for e in t.expected:
+            if e.key != "host_version" or e.check not in (Check.IN, Check.EQUALS):
+                continue
+            accepted = {str(v) for v in (e.values or [])} | ({str(e.value)} if e.value is not None else set())
+            missing = [v for v in supported if v not in accepted]
+            if missing:
+                errors.append(f"{t.id}: host_version must accept every host version the plug-in's manifest supports "
+                              f"({', '.join(supported)}: all runtime requirement ranges together, the package's and "
+                              f"each component entry's, mapped with the host profile's releases); missing "
+                              f"{', '.join(missing)}. If the ranges disagree, add an open question as well")
 
 
 def _check_func(plan: TestPlan, load_host: bool, sample_names: set[str], errors: list[str], check_citation,

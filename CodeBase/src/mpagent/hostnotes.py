@@ -31,6 +31,16 @@ def host_process(host_id: str, hosts_dir: Path = HOSTS_DIR) -> HostProcess | Non
     return HostProcess.model_validate(data) if data else None
 
 
+def host_releases(host_id: str, hosts_dir: Path = HOSTS_DIR) -> dict[str, str]:
+    """The host profile's `releases` table: host version -> release number used in plug-in manifests
+    ({} if the host has none)."""
+    path = hosts_dir / f"{host_id}.md"
+    if not path.is_file():
+        return {}
+    table = front_matter(path.read_text(encoding="utf-8")).get("releases") or {}
+    return {str(k): str(v) for k, v in table.items()}
+
+
 def host_navigation(host_id: str, hosts_dir: Path = HOSTS_DIR, key: str = "navigation") -> str | None:
     """The host's navigation guidance for Agent 2 (FUNC_TESTS_PLAN.md Q14): the prose file the host profile's
     `navigation:` front matter names, relative to the hosts folder; None if the host has none. With

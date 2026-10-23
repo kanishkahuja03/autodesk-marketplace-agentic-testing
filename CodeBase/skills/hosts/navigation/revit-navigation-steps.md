@@ -39,6 +39,13 @@ Use `find_ui("<name>", control_type="ListItem")` to list visible rows when you d
 - `type_ui("File name:", "<full path in the test's output folder>", press_enter=True)`.
 - If the host asks to replace an existing file, answer as the host-interaction skill says (never overwrite a file outside the run folder).
 
-## F. Undo and closing without saving
+## F. Model elements: a 3D view, picking an element, its parameters
+1. **Default 3D view:** `click_ui("View", control_type="Button")` shows the **View** tab; `click_ui("3D View", control_type="Button")` opens its drop-down; click **Default 3D View** in it (`click_ui("Default 3D View")`, or by its coordinates from a Screenshot). Then `wait_for_host(30)`; the main window title then ends with `- 3D View: {3D}]`. If a name answers "not found", click the house icon in the Quick Access Toolbar by its coordinates.
+2. **Find the element on a Screenshot** (the drawing area is not in the UI tree). Zoom in with Windows-MCP `Scroll` over that spot if it is small; to see the whole model, type `ZF` with the drawing area focused.
+3. **When a command asks you to pick an element** (read the status bar on the Screenshot): click the element by its coordinates (Windows-MCP `Click`), then `wait_for_host(30)` for the window the command opens next. If the wrong element was highlighted, press **Esc** and pick again; where elements overlap, hover and press **Tab** until the right one is highlighted, then click.
+4. **Read its parameters:** with the element selected, take a Screenshot of the **Properties** palette; scroll the palette (Windows-MCP `Scroll` over it) to the group you need and take another. `find_ui("<parameter name>")` may find a parameter row by its name; if not, read it from the Screenshot.
+5. **Esc** twice clears the selection.
+
+## G. Undo and closing without saving
 - **Ctrl+Z** (Windows-MCP `Shortcut`) undoes the last change in the model, only where the host-interaction skill asks you to undo.
 - Never save. When closing asks "Save changes …?", `click_ui("No", control_type="Button")`.
