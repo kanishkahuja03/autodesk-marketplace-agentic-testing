@@ -29,7 +29,8 @@ MACHINE_FOLDERS = ("ProgramData", "ProgramFiles", "ProgramFiles(x86)")
 # Windows' own churn, never an app's leftover: exact places, so an app folder whose path happens to contain
 # e.g. "Temp" still counts
 WINDOWS_PLACES = (("LOCALAPPDATA", "Temp"), ("LOCALAPPDATA", "Microsoft"), ("LOCALAPPDATA", "Packages"),
-                  ("LOCALAPPDATA", "CrashDumps"), ("APPDATA", "Microsoft"), ("ProgramData", "Microsoft"))
+                  ("LOCALAPPDATA", "CrashDumps"), ("LOCALAPPDATA", "D3DSCache"),  # DirectX shader cache
+                  ("APPDATA", "Microsoft"), ("ProgramData", "Microsoft"))
 WINDOWS_KEYS = (r"REG:HKCU\Software\Classes", r"REG:HKCU\Software\Microsoft", r"REG:HKLM\SOFTWARE\Classes",
                 r"REG:HKLM\SOFTWARE\Microsoft", r"REG:HKLM\SOFTWARE\WOW6432Node\Classes",
                 r"REG:HKLM\SOFTWARE\WOW6432Node\Microsoft")

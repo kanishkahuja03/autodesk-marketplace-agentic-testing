@@ -1,19 +1,26 @@
 ---
 name: ui-find
-description: How Agent 2 uses the find-by-name UI tools (find_ui, click_ui, type_ui) in the host's windows, and when it falls back to Windows-MCP. Generic for any host. Used by Agent 2 only, when the tools are switched on.
+description: How Agent 2 uses the find-by-name UI tools (find_ui, click_ui, type_ui) and wait_for_host in the host's windows, and when it falls back to Windows-MCP. Generic for any host. Used by Agent 2 only, when the tools are switched on.
 ---
 
 # Finding UI elements by name (Agent 2)
 
-You have three fast tools that act on the **host's windows** by an element's **name**, without a Snapshot:
+You have four fast tools that work on the **host's windows**, without a Snapshot:
 
 | Tool | Use it to |
 |---|---|
 | `find_ui(name, control_type)` | list the elements with that name (changes nothing) |
 | `click_ui(name, control_type, double)` | click the first match; `double=True` to double-click (e.g. open a tree item) |
 | `type_ui(name, text, control_type, press_enter)` | type into the first matching field (e.g. a dialog's file name box), optionally pressing Enter |
+| `wait_for_host(timeout_s)` | wait until the host shows something to act on; it returns **the moment** a new dialog opens (with its title, buttons and text), the main window is ready, or the host closes (changes nothing) |
 
-**How they match:** an element whose name is exactly `name` (ignoring upper/lower case) comes first; otherwise names that contain `name`. The **first match** is used. When a name occurs in several places, give `control_type` (e.g. `Button`, `TreeItem`, `ListItem`, `Edit`) so the first match is the right one.
+**Waiting: let `wait_for_host` watch, don't guess.** Right after you start the host, and after any action that may open a window (opening a file, starting a command), call `wait_for_host` instead of `WaitFor`, `Wait` or a Screenshot taken to check. It looks at the host's windows twice a second, so you never sit thinking while a dialog waits. Then act on what it reports at once:
+- **"A dialog opened" / "A dialog is waiting for an answer":** take a `Screenshot` (evidence), decide by the host-interaction skill's dialog rules, and answer with `click_ui("<button>", control_type="Button")` using a button name exactly as it listed. A button it just listed is clicked at once, where it was seen, even while the host is busy. Then `wait_for_host` again.
+- **"The host is ready":** go on with the test.
+- **"Still no ready main window or dialog":** take a Screenshot to see what the host shows; call it again if the host is still loading.
+- **"failed", "not running" or "has closed":** handle it as before (Screenshot; a crash allows one restart).
+
+**How they match:** an element whose name is exactly `name` (ignoring upper/lower case and treating any whitespace, including a line break in a two-line label, as one space) comes first; otherwise names that contain `name`. The **first match** is used. When a name occurs in several places, give `control_type` (e.g. `Button`, `TreeItem`, `ListItem`, `Edit`) so the first match is the right one.
 
 ## Rules
 1. **Use these tools first** whenever you know an element's name: from the host's navigation steps, from the test's claim, or from a dialog you just saw. They take seconds; a Snapshot can take close to a minute in a large host.

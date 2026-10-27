@@ -13,7 +13,7 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
-from agents import Agent, MaxTurnsExceeded, ModelSettings, Runner, function_tool
+from agents import Agent, MaxTurnsExceeded, ModelSettings, RunConfig, Runner, function_tool
 from ruamel.yaml import YAML
 
 from mpagent.config import PROJECT_ROOT, Settings
@@ -22,6 +22,7 @@ from mpagent.execute import host as host_mod
 from mpagent.execute.context import func_block, prepare_func_tests
 from mpagent.execute.guardrails import CallPolicy, tool_guardrail
 from mpagent.execute.host import HostLaunch
+from mpagent.execute.model_calls import ModelCallTrace, keep_recent_images
 from mpagent.execute.observations import load_observations, save_observation
 from mpagent.execute.ui_find import UiFinder, make_ui_find_tools
 from mpagent.execute.windows_mcp import CallRecorder, windows_mcp_server
@@ -248,7 +249,7 @@ async def _run(plan: TestPlan, run_dir: Path, installer_path: Path, settings: Se
     guard = tool_guardrail(run_dir, trace, policy=policy)
     server = windows_mcp_server(settings, recorder, [guard])
     ui_find = settings.agent2_ui_find_tools and host is not None
-    finder = UiFinder(host.processes, trace) if ui_find else None
+    finder = UiFinder(host.processes, trace, main_window=host.main_window) if ui_find else None
     observations = ObservationRecorder(run_dir, plan, recorder, trace, policy,
                                        window_titles=finder.window_titles if finder else None)
     tools = [make_record_observation(observations)]
@@ -266,7 +267,10 @@ async def _run(plan: TestPlan, run_dir: Path, installer_path: Path, settings: Se
         )
         prompt = build_input(plan, run_dir, installer_path, env000, facts, host, func)
         trace.write("agent2_request", input=prompt)
-        result = await Runner.run(agent, prompt, max_turns=max_turns or settings.agent2_max_turns)
+        result = await Runner.run(agent, prompt, max_turns=max_turns or settings.agent2_max_turns,
+                                  hooks=ModelCallTrace(trace),
+                                  run_config=RunConfig(call_model_input_filter=keep_recent_images(
+                                      settings.agent2_keep_screenshots)))
     trace.write("agent2_result", output=result.final_output.model_dump(mode="json"))
     return result.final_output
 
@@ -278,7 +282,8 @@ def run_agent2(plan: TestPlan, run_dir: Path, installer_path: Path, settings: Se
     # msiexec can't open its log in a missing folder and then aborts at once (run 20261012-191028)
     (run_dir / "evidence").mkdir(exist_ok=True)
     card = sample_card(plan)
-    func = func_block(prepare_func_tests(plan, run_dir, settings.samples_dir), card.sample if card else None)
+    func = func_block(prepare_func_tests(plan, run_dir, settings.samples_dir, settings.input_files),
+                      card.sample if card else None)
     minutes, turns = limits(plan, settings)
     try:
         out = asyncio.run(asyncio.wait_for(_run(plan, run_dir, installer_path, settings, facts, func, turns),

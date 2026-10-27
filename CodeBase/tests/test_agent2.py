@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import json
 import os
 import subprocess
 from dataclasses import replace
@@ -302,6 +303,30 @@ def test_load000_gets_the_sample_copy_and_func_tests_reuse_it(tmp_path):
     assert "record LOAD-000 with executed: false" in missing
 
 
+def test_input_file_is_copied_and_load000_keeps_a_new_empty_document(tmp_path, monkeypatch):
+    # a feature that imports a file (e.g. an exported .json) in a new empty document: no sample, an input file
+    from mpagent.design.selfcheck import sample_card
+    from mpagent.execute.context import func_block, prepare_func_tests
+
+    p = func_plan()
+    p.summary.features[0].sample, p.summary.features[0].input_file = None, "export.json"
+    (tmp_path / "export.json").write_text("{}")
+    assert sample_card(p) is None  # LOAD-000 opens a new empty document
+    [setup] = prepare_func_tests(p, tmp_path / "run", None, tmp_path / "export.json")
+    assert setup.input_copy == tmp_path / "run" / "context" / "inputs" / "export.json"
+    assert setup.input_copy.read_text() == "{}"
+    block = func_block([setup])
+    assert "LOAD-000 context" not in block and "context: no sample" in block
+    assert f"load this copy by its full path; never the original): {setup.input_copy}" in block
+
+    [missing] = prepare_func_tests(p, tmp_path / "run2", None, None)
+    assert missing.input_copy is None and "INPUT_FILES is not set" in missing.input_problem
+    assert "input file: 'export.json' is not available" in func_block([missing])
+
+    monkeypatch.setenv("INPUT_FILES", f'"{tmp_path / "export.json"}"')
+    assert load_settings().input_files == tmp_path / "export.json"
+
+
 def test_ui_find_tools_add_their_skill_only_when_switched_on():
     # UI_FIND_TOOLS_PLAN.md: with the switch off, Agent 2's instructions are exactly as before
     before = agent2.instructions("autocad-plant3d", with_host_interaction=True)
@@ -351,3 +376,45 @@ def test_load000_can_be_recorded_with_window_titles_read_by_code(tmp_path):
     saved = load_observations(tmp_path)[0]
     assert saved.evidence == ["evidence/LOAD-000_windows_ui.txt"]
     assert 'window "Host - [Drawing1.dwg]"' in (tmp_path / saved.evidence[0]).read_text(encoding="utf-8")
+
+
+def _shot(call_id: str) -> dict:
+    return {"type": "function_call_output", "call_id": call_id,
+            "output": [{"type": "input_text", "text": f"Saved as evidence: evidence/{call_id}.png"},
+                       {"type": "input_image", "image_url": "data:image/png;base64,AAAA"}]}
+
+
+def test_only_the_latest_screenshots_are_sent_to_the_model():
+    # run 20261022-160813: every screenshot so far was re-sent on each turn and the think time grew
+    from agents.run_config import CallModelData, ModelInputData
+
+    from mpagent.execute.model_calls import DROPPED_IMAGE_NOTE, count_images, keep_recent_images
+
+    items = [{"role": "user", "content": "run the plan"}, _shot("a"),
+             {"type": "function_call_output", "call_id": "t", "output": "text only"}, _shot("b"), _shot("c")]
+    data = CallModelData(model_data=ModelInputData(input=items, instructions="x"), agent=None, context=None)
+    sent = keep_recent_images(2)(data)
+    assert count_images(sent.input) == 2 and sent.instructions == "x"
+    assert sent.input[1]["output"] == [{"type": "input_text", "text": "Saved as evidence: evidence/a.png"},
+                                       {"type": "input_text", "text": DROPPED_IMAGE_NOTE}]
+    assert sent.input[3:] == items[3:] and sent.input[2] == items[2]
+    assert count_images(items) == 3  # the run's own history keeps every image
+    assert keep_recent_images(0)(data).input is items and keep_recent_images(5)(data).input is items
+
+
+def test_every_model_call_is_traced_with_its_time_and_images(tmp_path):
+    from mpagent.execute.model_calls import ModelCallTrace
+
+    hooks = ModelCallTrace(Trace(tmp_path))
+    usage = SimpleNamespace(input_tokens=100, output_tokens=20, output_tokens_details=SimpleNamespace(reasoning_tokens=7))
+    asyncio.run(hooks.on_llm_start(None, None, "x", [_shot("a"), _shot("b")]))
+    asyncio.run(hooks.on_llm_end(None, None, SimpleNamespace(usage=usage)))
+    record = json.loads((tmp_path / "trace.jsonl").read_text(encoding="utf-8"))
+    assert record["event"] == "model_call" and record["n"] == 1 and record["images_sent"] == 2
+    assert (record["input_tokens"], record["output_tokens"], record["reasoning_tokens"]) == (100, 20, 7)
+    assert record["seconds"] >= 0
+
+
+def test_screenshots_kept_setting(monkeypatch):
+    monkeypatch.setenv("AGENT2_KEEP_SCREENSHOTS", "0")
+    assert load_settings().agent2_keep_screenshots == 0

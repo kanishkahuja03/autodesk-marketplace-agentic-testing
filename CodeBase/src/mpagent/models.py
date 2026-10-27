@@ -307,6 +307,9 @@ class FeatureCard(BaseModel):
         description="What must be open to use it, in the documents' words; null if the documents state nothing")
     sample: str | None = Field(
         description="Name of the sample (from the samples listing) that gives this context its content; null if none is needed or none fits")
+    input_file: str | None = Field(
+        default=None,
+        description="Name of the input file (from the input files listing) the feature loads through the app's UI; null if it loads none or none fits")
     results: list[Citation] = Field(
         description="Each statement the documents make about the feature's result, one citation per statement")
     sources: list[Citation] = Field(description="Quotes for the name, how it is started and its context")

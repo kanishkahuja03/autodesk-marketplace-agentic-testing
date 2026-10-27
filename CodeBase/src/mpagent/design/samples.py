@@ -40,12 +40,22 @@ def render_samples(samples: list[Sample]) -> str:
     if not samples:
         return ("<samples>\nNo samples are available. A feature whose claims need a context with content gets no "
                 "test (open question).\n</samples>")
-    blocks = []
-    for s in samples:
-        lines = [f"{path} ({size:,} bytes)" for path, size in s.files]
-        if s.total_files > len(s.files):
-            lines.append(f"... and {s.total_files - len(s.files)} more files")
-        kind = "folder" if s.path.is_dir() else "file"
-        blocks.append(f'<sample name="{s.name}" kind="{kind}" files="{s.total_files}" bytes="{s.total_bytes:,}">\n'
-                      + "\n".join(lines) + "\n</sample>")
-    return "<samples>\n" + "\n".join(blocks) + "\n</samples>"
+    return "<samples>\n" + "\n".join(_listing(s, "sample") for s in samples) + "\n</samples>"
+
+
+def render_input_files(inputs: list[Sample]) -> str:
+    """The input files block of Agent 1's input: files a feature loads through the app's own UI (e.g. an
+    exported .json to import), not documents the host opens. Names and sizes only, like the samples."""
+    if not inputs:
+        return ("<input_files>\nNo input files are available. A feature that needs a file to load gets no test "
+                "(open question).\n</input_files>")
+    return "<input_files>\n" + "\n".join(_listing(s, "input_file") for s in inputs) + "\n</input_files>"
+
+
+def _listing(s: Sample, tag: str) -> str:
+    lines = [f"{path} ({size:,} bytes)" for path, size in s.files]
+    if s.total_files > len(s.files):
+        lines.append(f"... and {s.total_files - len(s.files)} more files")
+    kind = "folder" if s.path.is_dir() else "file"
+    return (f'<{tag} name="{s.name}" kind="{kind}" files="{s.total_files}" bytes="{s.total_bytes:,}">\n'
+            + "\n".join(lines) + f"\n</{tag}>")

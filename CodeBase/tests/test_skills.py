@@ -10,11 +10,13 @@ from mpagent.models import HostProcess
 
 SKILLS = Path(__file__).parent.parent / "skills"
 SRC = Path(__file__).parent.parent / "src" / "mpagent"
-EXPECTED = ["test-design/SKILL.md", "hosts/autocad-plant3d.md", "hosts/none.md",
+EXPECTED = ["test-design/SKILL.md", "hosts/autocad-plant3d.md", "hosts/revit.md", "hosts/none.md",
+            "hosts/navigation/revit-navigation.md", "hosts/navigation/revit-navigation-steps.md",
             "execute/windows-installer.md", "execute/evidence.md", "execute/host-interaction.md",
             "execute/judge.md", "execute/ui-find.md"]
+HOSTS = ["autocad-plant3d", "revit"]
 # Generic parts must not name a product (LOAD_TESTS_PLAN.md, rule kept from D1)
-PRODUCT_NAMES = re.compile(r"plant ?3d|autocad|acad|p&id", re.IGNORECASE)
+PRODUCT_NAMES = re.compile(r"plant ?3d|autocad|acad|p&id|revit", re.IGNORECASE)
 GENERIC_FILES = [SKILLS / "execute" / "host-interaction.md", SRC / "hostnotes.py", SRC / "execute" / "host.py",
                  SRC / "execute" / "context.py", SRC / "design" / "samples.py",
                  SKILLS / "execute" / "ui-find.md", SRC / "execute" / "ui_find.py",
@@ -36,9 +38,10 @@ def test_host_note_name_matches_file_name():
         assert front_matter(note.read_text(encoding="utf-8"))["name"] == note.stem
 
 
-def test_host_process_front_matter():
+@pytest.mark.parametrize("host_id", HOSTS)
+def test_host_process_front_matter(host_id):
     # code reads it (LOAD_TESTS_PLAN.md L9); 'none' has no host to start
-    hp = host_process("autocad-plant3d", SKILLS / "hosts")
+    hp = host_process(host_id, SKILLS / "hosts")
     assert isinstance(hp, HostProcess) and hp.processes and hp.args
     for pattern in (hp.locate.match, hp.main_window, hp.new_document):
         re.compile(pattern)
@@ -122,12 +125,16 @@ def test_navigation_file_is_named_by_the_host_profile_and_names_no_app():
     nav = host_navigation("autocad-plant3d", SKILLS / "hosts")
     assert nav and "# Navigating AutoCAD Plant 3D" in nav and "host-interaction skill" in nav
     assert host_navigation("none", SKILLS / "hosts") is None
-    app_words = re.compile(r"kleen|connector|exporter|revit|export p&id|json", re.IGNORECASE)
+    # the apps under test; Revit is a host since ADR-048, so its navigation file names it
+    app_words = re.compile(r"kleen|connector|exporter|export p&id|json|tiny tools|archilizer|renumber", re.IGNORECASE)
     for path in (SKILLS / "hosts" / "navigation").glob("*.md"):
         text = path.read_text(encoding="utf-8")
         assert not app_words.search(text), f"{path.name}: {app_words.search(text).group()}"
     assert "# Navigating AutoCAD Plant 3D" in agent2.instructions("autocad-plant3d", with_host_interaction=True)
     assert "# Navigating" not in agent2.instructions("autocad-plant3d")  # only with the host tests
+    revit = host_navigation("revit", SKILLS / "hosts")
+    assert revit and "# Navigating Autodesk Revit" in revit and "host-interaction skill" in revit
+    assert '"Load Once"' in revit and "Ignore and continue opening the project" in revit  # ADR-048
 
 
 def test_waitfor_takes_plain_text_and_load000_can_open_the_sample():
@@ -158,6 +165,10 @@ def test_navigation_steps_are_named_by_the_host_profile():
     steps = host_navigation("autocad-plant3d", SKILLS / "hosts", "navigation_steps")
     assert steps and 'click_ui("P&ID Drawings", control_type="TreeItem", double=True)' in steps
     assert 'type_ui("File name:"' in steps and "Screenshot only" in steps
+    revit = host_navigation("revit", SKILLS / "hosts", "navigation_steps")
+    assert revit and "wait_for_host(90)" in revit and '"Load Once"' in revit and 'control_type="ListItem"' in revit
+    ui = (SKILLS / "execute" / "ui-find.md").read_text(encoding="utf-8")
+    assert "**Waiting: let `wait_for_host` watch, don't guess.**" in ui  # ADR-050
     assert host_navigation("none", SKILLS / "hosts", "navigation_steps") is None
 
 

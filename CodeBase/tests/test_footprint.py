@@ -1,6 +1,7 @@
 """Tests for UNIN-000 "nothing left behind" (ARCHITECTURE.md D64). Run with: uv run pytest"""
 
 from mpagent.execute import footprint
+from mpagent.hostnotes import host_process
 
 
 def fake_machine(tmp_path, monkeypatch):
@@ -27,6 +28,7 @@ def test_new_entries_after_the_uninstall_are_leftovers(tmp_path, monkeypatch):
     (tmp_path / "APPDATA" / "Vendor" / "Plugins" / "app.bundle").mkdir()             # in the install root
     (tmp_path / "ProgramData" / "AppCache").mkdir()                                  # machine-wide
     (tmp_path / "LOCALAPPDATA" / "Temp").mkdir()                                     # Windows' churn
+    (tmp_path / "LOCALAPPDATA" / "D3DSCache" / "1d60326bea10db40").mkdir(parents=True)  # DirectX shader cache
 
     obs = footprint.record_unin000(run, roots)
     values = {kv.key: kv.value for kv in obs.observed}
@@ -52,3 +54,11 @@ def test_host_churn_can_be_ignored_and_nested_entries_are_reported_once():
     before = {r"DIR:C:\U\A"}
     after = before | {r"DIR:C:\U\Host\Cache", r"DIR:C:\U\App", r"FILE:C:\U\App\x.dat", r"REG:HKCU\Software\App"}
     assert footprint.leftovers(before, after, [r"\\Host\\Cache"]) == [r"DIR:C:\U\App", r"REG:HKCU\Software\App"]
+
+
+def test_revit_licensing_log_is_host_churn():
+    # run tiny-tools/20261022-111530: Revit's own licensing log failed UNIN-000
+    ignore = host_process("revit").profile_ignore
+    log = r"FILE:C:\ProgramData\Autodesk\AdlmAdlSdk-RVT2027ENGLog-14296.log"
+    assert footprint.leftovers(set(), {log, r"FILE:C:\ProgramData\Autodesk\App.log"}, ignore) == [
+        r"FILE:C:\ProgramData\Autodesk\App.log"]

@@ -2,11 +2,12 @@
 
 import copy
 
-from plans import TAB_QUOTE, good_plan_data, load_plan_data
+from plans import TAB_QUOTE, _test, good_plan_data, load_plan_data
 
 from mpagent.design.evidence import Source
-from mpagent.design.selfcheck import check_plan, normalise
-from mpagent.models import TestPlan
+from mpagent.design.selfcheck import check_plan, normalise, supported_host_versions
+from mpagent.hostnotes import host_releases
+from mpagent.models import BundleManifest, InstallerFacts, RuntimeRequirement, TestPlan
 
 SOURCES = [
     Source("D1", "Description.txt", "Note: This Autodesk® AutoCAD® Plant 3D™ plugin is part of the P&ID\nConnector workflow."),
@@ -18,6 +19,37 @@ HOSTS = ["autocad-plant3d", "none"]
 
 def errors_for(data: dict) -> list[str]:
     return check_plan(TestPlan.model_validate(data), SOURCES, HOSTS)
+
+
+def _facts(*ranges) -> InstallerFacts:
+    """Installer facts whose one manifest has these (scope, series_min, series_max) runtime requirements."""
+    return InstallerFacts(installer_file="x.msi", installer_type="msi", sha256="0", bundles=[BundleManifest(
+        source="PackageContents.xml", runtime_requirements=[
+            RuntimeRequirement(scope=s, platform="Host", series_min=lo, series_max=hi) for s, lo, hi in ranges])])
+
+
+def test_supported_host_versions_join_the_package_and_component_ranges():
+    # run 20261022-133504: the package said R2022-R2026, the component entries R2021 ... R2027
+    revit = host_releases("revit")
+    facts = _facts(("package", "R2022", "R2026"), *[("components", f"R{y}", f"R{y}") for y in range(2021, 2028)])
+    assert supported_host_versions(facts, revit) == ["2022", "2023", "2024", "2025", "2026", "2027"]
+    plant = host_releases("autocad-plant3d")
+    assert supported_host_versions(facts, plant) == []  # another host's numbering matches nothing
+    assert supported_host_versions(_facts(("package", "R24.0", "R25.0")), plant) == ["2024", "2025"]
+    assert supported_host_versions(_facts(("package", "R25.1", None)), plant) == ["2026", "2027"]  # open-ended
+    assert supported_host_versions(_facts(("package", None, "R25.0")), plant) == []
+
+
+def test_env_host_version_must_accept_every_supported_version():
+    facts = _facts(("package", "R25.0", "R25.1"), ("components", "R26.0", "R26.0"))
+    data = copy.deepcopy(good_plan_data())
+    env = _test("ENV-001", "ENV", "properties.Manufacturer = Kleen Software GmbH", [], ["Check the host version"],
+                ["host_version"], [{"key": "host_version", "check": "in", "value": None, "values": ["2025", "2026"]}])
+    data["testcases"].insert(0, env)
+    errors = check_plan(TestPlan.model_validate(data), SOURCES, HOSTS, facts=facts)
+    assert any("ENV-001: host_version must accept every host version" in e and "missing 2027" in e for e in errors)
+    env["expected"][0]["values"].append("2027")
+    assert not any("host_version" in e for e in check_plan(TestPlan.model_validate(data), SOURCES, HOSTS, facts=facts))
 
 
 def changed(edit) -> dict:
@@ -88,7 +120,7 @@ def test_expectation_rules():
 
 
 def test_host_rules():
-    assert any("not in the catalogue" in e for e in errors_for(changed(lambda d: d["app"].update(host_id="revit"))))
+    assert any("not in the catalogue" in e for e in errors_for(changed(lambda d: d["app"].update(host_id="no-such-host"))))
     assert any("host_evidence is empty" in e for e in errors_for(changed(lambda d: d["app"].update(host_evidence=[]))))
     unknown = changed(lambda d: d["app"].update(host_id="unknown", host_evidence=[]))
     assert any("'unknown' but summary.open_questions" in e for e in errors_for(unknown))
@@ -293,6 +325,26 @@ def test_feature_card_quotes_and_sample_are_checked():
     assert any("results[2]: quote not found in D3" in e for e in errors)
     assert any("SampleProject" in e and "not in the samples listing (none are available)" in e
                for e in func_errors(samples=()))
+
+
+def test_feature_card_input_file_is_checked_against_the_listing():
+    def with_input(d):
+        _card(d)["input_file"] = "export.json"
+    assert any("input_file 'export.json' is not in the input files listing (none are available)" in e
+               for e in func_errors(with_input))
+    data = copy.deepcopy(func_plan_data())
+    with_input(data)
+    assert check_plan(TestPlan.model_validate(data), FUNC_SOURCES, HOSTS, ("autocad-plant3d",), ("SampleProject",),
+                      ("export.json",)) == []
+
+
+def test_input_files_are_listed_in_their_own_block(tmp_path):
+    from mpagent.design.samples import list_samples, render_input_files
+
+    (tmp_path / "export.json").write_bytes(b"{}")
+    text = render_input_files(list_samples(tmp_path / "export.json"))
+    assert text.startswith("<input_files>\n") and '<input_file name="export.json" kind="file" files="1"' in text
+    assert "No input files are available" in render_input_files([])
 
 
 def test_testable_card_needs_its_test_and_untestable_card_a_reason():
