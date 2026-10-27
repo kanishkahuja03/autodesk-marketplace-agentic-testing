@@ -26,7 +26,7 @@ This file only tells you **where things are in the host** and the fastest way to
 
 ## 4. Ribbon, tabs and panels
 - The **ribbon** is the band of tabs below the title bar. Plug-ins add their own tabs there, usually after the host's own tabs. Which tabs appear depends on the **kind of drawing that is active** and on the current workspace: a tab may only appear once a drawing of the right kind is open.
-- **Ribbon tabs and their buttons are usually not in the UI tree.** Take a `Screenshot` (or a Snapshot with vision) to read their names, and click by the coordinates from that screenshot.
+- **Ribbon tabs and their buttons are usually not in the UI tree.** Take a `Screenshot` to read their names. With the name tools, click them with `click_ui` by the name as shown (it reads the text on the screen); otherwise, or if it doesn't find them, click by the coordinates from that screenshot.
 - If the ribbon shows only tab names, click a tab name once to show its buttons for a moment. Don't double-click a tab name: that changes how the ribbon is shown (a lasting setting).
 - Buttons on a ribbon panel may hide more commands behind a small arrow below or beside them; open it only to show what is in it.
 - Don't switch the workspace (the gear in the status bar at the bottom right): it is a lasting setting.

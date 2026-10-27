@@ -9,7 +9,7 @@
     <OutputPath>.</OutputPath>
     <!-- F5 runs the full pipeline for this input folder, from the CodeBase folder (ARCHITECTURE.md D16, D17) -->
     <StartupFile>src\mpagent\cli.py</StartupFile>
-    <CommandLineArguments>inputs/pid-connector-importer</CommandLineArguments>
+    <CommandLineArguments>inputs/pid-connector-exporter</CommandLineArguments>
     <WorkingDirectory>.</WorkingDirectory>
     <SearchPath>src</SearchPath>
     <!-- Use the project's own .venv (created by uv) -->

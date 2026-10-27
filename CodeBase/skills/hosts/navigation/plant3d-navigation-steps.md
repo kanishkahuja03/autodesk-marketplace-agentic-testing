@@ -30,8 +30,11 @@ Use `find_ui("<name>", control_type="TreeItem")` to list a folder's drawings whe
 - `type_ui("File name:", "<full path in the test's output folder>", press_enter=True)`.
 - If the host asks to replace an existing file, answer as the host-interaction skill says (never overwrite a file outside the run folder).
 
-## D. Ribbon tabs and their buttons: Screenshot only
-The ribbon (its tabs, panels, buttons and drop-downs, including tabs that plug-ins add) is **not in the UI tree**. **Screenshot only:** don't try the name tools there and don't take a Snapshot of it (it shows none of these items); take a Screenshot and click by its coordinates (Windows-MCP `Click`). This holds for the names a test's claim gives too (e.g. a plug-in's tab or button).
+## D. Ribbon tabs and their buttons: `click_ui` by the text shown, no Snapshot
+The ribbon (its tabs, panels, buttons and drop-downs, including tabs that plug-ins add) is **not in the UI tree**, but `click_ui` reads its text on the screen. **Never take a Snapshot of the ribbon** (it shows none of these items).
+1. Take a Screenshot to read the names exactly as shown (a plug-in's tab or button may be named differently or in another language than the documents say).
+2. `click_ui("<tab or button text as shown>")`, without `control_type`. Check the result with a Screenshot.
+3. If it answers "not found" or lists the name several times, or the item shows only an icon, click by the Screenshot's coordinates (Windows-MCP `Click`).
 
 ## E. Closing without saving
 - `CLOSE` on the command line (Windows-MCP `Type`), then `click_ui("No", control_type="Button")` when asked "Save changes to …?".

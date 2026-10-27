@@ -9,8 +9,8 @@ You have four fast tools that work on the **host's windows**, without a Snapshot
 
 | Tool | Use it to |
 |---|---|
-| `find_ui(name, control_type)` | list the elements with that name (changes nothing) |
-| `click_ui(name, control_type, double)` | click the first match; `double=True` to double-click (e.g. open a tree item) |
+| `find_ui(name, control_type)` | list the elements with that name (changes nothing): first the text read on the screen, else the UI tree |
+| `click_ui(name, control_type, double)` | click the element with that name; `double=True` to double-click (e.g. open a tree item) |
 | `type_ui(name, text, control_type, press_enter)` | type into the first matching field (e.g. a dialog's file name box), optionally pressing Enter |
 | `wait_for_host(timeout_s)` | wait until the host shows something to act on; it returns **the moment** a new dialog opens (with its title, buttons and text), the main window is ready, or the host closes (changes nothing) |
 
@@ -20,13 +20,15 @@ You have four fast tools that work on the **host's windows**, without a Snapshot
 - **"Still no ready main window or dialog":** take a Screenshot to see what the host shows; call it again if the host is still loading.
 - **"failed", "not running" or "has closed":** handle it as before (Screenshot; a crash allows one restart).
 
-**How they match:** an element whose name is exactly `name` (ignoring upper/lower case and treating any whitespace, including a line break in a two-line label, as one space) comes first; otherwise names that contain `name`. The **first match** is used. When a name occurs in several places, give `control_type` (e.g. `Button`, `TreeItem`, `ListItem`, `Edit`) so the first match is the right one.
+**How they match:** an element whose name is exactly `name` (ignoring upper/lower case and treating any whitespace, including a line break in a two-line label, as one space) comes first; otherwise names that contain `name`. When a name occurs in several places, give `control_type` (e.g. `Button`, `TreeItem`, `ListItem`, `Edit`) so the first match is the right one.
+
+**Text on the screen first:** `click_ui` and `find_ui` first read the text shown in the host's windows (OCR), so they also find labels that aren't in the UI tree, such as tabs and toolbars a host draws itself. `click_ui` clicks there only a label that is **the only exact match**, or, if there is none, **the only one that contains** `name`; then the reply says "(found by OCR)". Otherwise it searches the UI tree as above. If the UI tree has nothing and the screen shows the name several times, the reply lists each place with its coordinates: take a Screenshot and click the right one with Windows-MCP `Click`. So give the name **exactly as the screen shows it** (its language and spelling), not as the documents write it. OCR doesn't know the element's type, and `type_ui` always uses the UI tree.
 
 ## Rules
 1. **Use these tools first** whenever you know an element's name: from the host's navigation steps, from the test's claim, or from a dialog you just saw. They take seconds; a Snapshot can take close to a minute in a large host.
 2. **Fall back to Windows-MCP** (a Screenshot, or a Snapshot, then `Click` by label or coordinates) when:
    - a tool answers "not found", "not running", "took longer" or "failed";
-   - the element isn't in the UI tree at all: some hosts draw tabs, toolbars or drawing areas themselves. If the navigation steps say an area needs a Screenshot, go there directly, without trying the name tools first.
+   - the element shows no text (an icon only), or `click_ui` listed it several times on the screen. If the navigation steps say an area needs a Screenshot, go there directly, without trying the name tools first.
 3. **Check what happened** after a click that changes the screen: take a `Screenshot` (it is also the reviewer's evidence, as before). If the wrong thing opened, close it without saving and use the fallback.
 4. **Dialogs and notices:** read their buttons in the Screenshot and answer with `click_ui("<button text>", control_type="Button")`; no Snapshot is needed for that.
 5. **Screenshot before Snapshot:** to see what is on screen, take a Screenshot (a few seconds). Take a Snapshot only when a test needs one (e.g. the one its record requires) or when neither the name tools nor a Screenshot give you what you need.

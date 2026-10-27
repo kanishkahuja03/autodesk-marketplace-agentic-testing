@@ -12,6 +12,11 @@ instead; Windows does the search (case-insensitive, name contains the text), so 
 Rules kept (G1): only the host's windows are searched (its processes from the host profile, incl. their owned
 dialogs); the same call with the same arguments at most 3 times per run (like D36); every call is traced to
 trace.jsonl. Nothing here names a host or an app: names come from the navigation file or the test's claims.
+
+OCR first (OCR_UI_PLAN.md): with an OcrReader, click_ui and find_ui read the text on the host's windows before they
+search the UI Automation tree (ocr.py). click_ui clicks a single exact match there, or a single "contains" match when
+there is no exact one; several matches go to UI Automation, which knows element types. type_ui and wait_for_host
+don't use OCR.
 """
 
 import concurrent.futures
@@ -27,6 +32,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from mpagent.execute import ocr
+from mpagent.execute.ocr import OcrReader, OcrUnavailable, normalize
 from mpagent.runlog import Trace, log
 
 MAX_MATCHES = 10
@@ -45,6 +52,8 @@ MAX_WAIT_S = 120  # longest wait_for_host call, like the time limit of a Windows
 MAX_DIALOG_NODES = 300  # elements read per dialog for its buttons and text; a host's main window is never read
 MAX_LABELS = 12
 REPORTED_BUTTON_S = 60.0  # click_ui clicks a button wait_for_host just reported where it was, for this long
+OCR_TYPE = "OCR, type unknown"  # the control_type of a match read from the screen
+OCR_TOOLS = ("click_ui", "find_ui")
 
 
 @dataclass(frozen=True)
@@ -75,13 +84,10 @@ class Backend(Protocol):
     def find(self, pids: set[int], name: str, control_type: str | None) -> list[Match]: ...
     def titles(self, pids: set[int]) -> list[str]: ...
     def windows(self, pids: set[int], main_window: re.Pattern | None) -> list[HostWindow]: ...
+    def regions(self, pids: set[int], main_window: re.Pattern | None) -> list[tuple[str, bool, tuple[int, int, int, int]]]:
+        """(title, is the main window, screen rectangle) of each visible host window and owned dialog, for OCR."""
     def click(self, m: Match, double: bool) -> None: ...
     def type_into(self, m: Match, text: str, press_enter: bool) -> None: ...
-
-
-def normalize(name: str) -> str:
-    """Case-insensitive, with every run of whitespace (incl. the line break of a two-line label) as one space."""
-    return " ".join(name.split()).casefold()
 
 
 def search_word(name: str) -> str:
@@ -125,11 +131,13 @@ class UiFinder:
 
     def __init__(self, processes: list[str], trace: Trace, backend: Backend | None = None,
                  pids: Callable[[list[str]], dict[int, str]] | None = None, timeout_s: float = SEARCH_TIMEOUT_S,
-                 main_window: str | None = None):
-        """`main_window`: the host profile's regex for its main window title (wait_for_host)."""
+                 main_window: str | None = None, ocr_reader: OcrReader | None = None):
+        """`main_window`: the host profile's regex for its main window title (wait_for_host).
+        `ocr_reader`: read the screen first in click_ui and find_ui (None: UI Automation only)."""
         from mpagent.execute.host import running_pids
 
         self.processes, self.trace, self.timeout_s = processes, trace, timeout_s
+        self._ocr = ocr_reader
         self.main_window = re.compile(main_window) if main_window else None
         self.retry_after_s = RETRY_AFTER_S
         self.poll_s, self.settle_s = POLL_S, SETTLE_S
@@ -162,7 +170,8 @@ class UiFinder:
                 self.backend.click(reported, False)
             result = f"Clicked {describe(reported)} (the button wait_for_host reported)."
             self.trace.write("ui_find_call", tool="click_ui", arguments=args,
-                             seconds=round(time.monotonic() - started, 2), result=result, matches=[describe(reported)])
+                             seconds=round(time.monotonic() - started, 2), result=result, matches=[describe(reported)],
+                             engine="reported")
             log.info("  click_ui %s -> %s", json.dumps(args, ensure_ascii=False), result[:120])
             return result
         return self._call("click_ui", args,
@@ -276,6 +285,7 @@ class UiFinder:
               act: Callable[[Backend, Match], None] | None) -> str:
         started = time.monotonic()
         matches: list[Match] = []
+        extra: dict = {}  # how the element was found, for the trace (OCR_UI_PLAN.md §3.2)
         try:
             result = self._checked(tool, args)
             if result is None:
@@ -283,15 +293,28 @@ class UiFinder:
                 if not pids:
                     result = f"The host is not running ({', '.join(self.processes)}). {FALLBACK}"
                 else:
+                    result, matches = self._by_ocr(tool, args, pids, act, extra)
+                if result is None:
+                    uia_started = time.monotonic()
                     backend = self.backend
                     word = search_word(args["name"])
                     found = matching(args["name"], self._run(backend.find, pids, word, args["control_type"]))
-                    if not found:  # once more, for a host that is still starting or loading
-                        time.sleep(self.retry_after_s)
+                    if not found and "ocr_seconds" not in extra:  # once more, for a host still starting or loading
+                        time.sleep(self.retry_after_s)  # (not after OCR: its look already gave the host that time)
                         found = matching(args["name"], self._run(backend.find, self._host_pids(), word,
                                                                  args["control_type"]))
                     matches = order_matches(args["name"], found)
-                    if not matches:
+                    extra.update(engine="uia", uia_seconds=round(time.monotonic() - uia_started, 2))
+                    on_screen = extra.pop("_ocr_several", [])
+                    if not matches and on_screen:  # OCR read it several times; UI Automation can't tell them apart
+                        matches = on_screen
+                        extra["engine"] = "ocr"
+                        result = (f"No element named '{args['name']}' in the UI tree, but OCR read it {len(on_screen)} "
+                                  "times on the screen:\n"
+                                  + "\n".join(f"{i}. {describe(m)}" for i, m in enumerate(on_screen[:MAX_MATCHES], 1))
+                                  + "\nTake a Screenshot and click the right one with Windows-MCP Click at its "
+                                  "coordinates.")
+                    elif not matches:
                         kind = f" of type {args['control_type']}" if args["control_type"] else ""
                         result = f"No element named '{args['name']}'{kind} in the host's windows. {FALLBACK}"
                     else:
@@ -302,12 +325,68 @@ class UiFinder:
             result = f"The UI search took longer than {self.timeout_s:g} s. {FALLBACK}"
         except Exception as e:  # noqa: BLE001 - a UI Automation problem is a message to Agent 2, never a crash
             result = f"{tool} failed ({type(e).__name__}: {e}). {FALLBACK}"
+        extra.pop("_ocr_several", None)
         seconds = round(time.monotonic() - started, 2)
         self.trace.write("ui_find_call", tool=tool, arguments=args, seconds=seconds, result=result,
-                         matches=[describe(m) for m in matches[:MAX_MATCHES]])
+                         matches=[describe(m) for m in matches[:MAX_MATCHES]], **extra)
         log.info("  %s %s -> %s (%.1f s)", tool, json.dumps(args, ensure_ascii=False), result.splitlines()[0][:120],
                  seconds)
         return result
+
+    def _by_ocr(self, tool: str, args: dict, pids: set[int], act: Callable[[Backend, Match], None] | None,
+                extra: dict) -> tuple[str | None, list[Match]]:
+        """click_ui / find_ui on the text OCR reads in the host's windows. Returns (result, matches), or (None, [])
+        to go on with UI Automation. Several click_ui matches are kept in extra["_ocr_several"] for that case."""
+        if self._ocr is None or tool not in OCR_TOOLS:
+            return None, []
+        started = time.monotonic()
+        try:  # the backend first: built on the worker thread, it can't be built from a job running there
+            exact, contains, words = self._run(self._ocr_hits, self.backend, pids, args["name"])
+        except OcrUnavailable as e:
+            log.warning("  OCR is off for this run: %s; the name tools use UI Automation only", e)
+            self._ocr = None
+            extra["ocr_error"] = str(e)
+            return None, []
+        except concurrent.futures.TimeoutError:
+            raise
+        except Exception as e:  # noqa: BLE001 - an OCR problem never stops the UI Automation search
+            extra["ocr_error"] = f"{type(e).__name__}: {e}"
+            return None, []
+        extra.update(ocr_seconds=round(time.monotonic() - started, 2), ocr_words=words)
+        if tool == "find_ui":
+            found = exact + contains
+            if not found:
+                return None, []
+            extra["engine"] = "ocr"
+            return (f"{len(found)} match(es) read on the screen by OCR ({OCR_TYPE}); click_ui clicks one by itself only "
+                    "when it is the only exact match, or the only one that contains the name:\n"
+                    + "\n".join(f"{i}. {describe(m)}" for i, m in enumerate(found[:MAX_MATCHES], 1))), found
+        target = exact[0] if len(exact) == 1 else contains[0] if not exact and len(contains) == 1 else None
+        if target is None:
+            extra["_ocr_several"] = exact or contains
+            return None, []
+        self._run(act, self.backend, target)
+        extra["engine"] = "ocr"
+        verb = "Double-clicked" if args.get("double") else "Clicked"
+        return f"{verb} {describe(target)} (found by OCR).", [target]
+
+    def _ocr_hits(self, backend: Backend, pids: set[int], name: str) -> tuple[list[Match], list[Match], int]:
+        """OCR matches in the host's dialogs, else in its main window (like the UI Automation search, ADR-050):
+        (exact, contains, words read). Runs in the worker thread."""
+        regions = backend.regions(pids, self.main_window)
+        words = 0
+        for stage in ([r for r in regions if not r[1]], [r for r in regions if r[1]]):
+            exact: list[Match] = []
+            contains: list[Match] = []
+            for title, _, rect in stage:
+                lines = self._ocr.read(*rect)
+                words += sum(len(line) for line in lines)
+                hits = ocr.find(lines, name)
+                for found, out in zip(hits, (exact, contains)):
+                    out += [Match(h.text, OCR_TYPE, title, *h.centre, True) for h in found]
+            if exact or contains:
+                return exact, contains, words
+        return [], [], words
 
     def _checked(self, tool: str, args: dict) -> str | None:
         """A refusal text, or None if the call may run."""
@@ -447,6 +526,21 @@ class UiaBackend:
                                           *self._labels(child)))
         return out
 
+    def regions(self, pids: set[int], main_window: re.Pattern | None) -> list[tuple[str, bool, tuple[int, int, int, int]]]:
+        """The host's visible top-level windows and the windows they own, with their screen rectangles (for OCR)."""
+        u, auto = self.uia, self.auto
+        owned = auto.CreatePropertyCondition(u.UIA_ControlTypePropertyId, u.UIA_WindowControlTypeId)
+        out = []
+        for top in self._host_windows(pids):
+            if not _visible(top):
+                continue
+            title = top.CurrentName or ""
+            out.append((title, bool(main_window and main_window.search(title)), _rect(top)))
+            for child in _elements(top.FindAll(u.TreeScope_Children, owned)):
+                if _visible(child):
+                    out.append((child.CurrentName or title, False, _rect(child)))
+        return out
+
     def _labels(self, window) -> tuple[tuple[str, ...], tuple[str, ...], tuple[tuple[int, int], ...]]:
         """The names of a dialog's own buttons and its texts, read in one UI Automation call (a cache request:
         a busy host answers each separate property read slowly). Title-bar buttons (close, minimize) are not the
@@ -519,6 +613,11 @@ def _elements(array) -> list:
     return [array.GetElement(i) for i in range(array.Length)] if array else []
 
 
+def _rect(element) -> tuple[int, int, int, int]:
+    r = element.CurrentBoundingRectangle
+    return r.left, r.top, r.right, r.bottom
+
+
 def _visible(element) -> bool:
     """On screen: a non-empty rectangle and not marked off-screen (hidden helper windows are both)."""
     try:
@@ -539,21 +638,24 @@ def make_ui_find_tools(finder: UiFinder) -> list:
 
     @function_tool
     def find_ui(name: str, control_type: str | None = None) -> str:
-        """List UI elements of the host whose name is (or contains) this text. Changes nothing.
+        """List UI elements of the host whose name is (or contains) this text: first the text read on the screen
+        (OCR, element type unknown), else the UI tree. Changes nothing.
 
         Args:
             name: The element's name as shown, e.g. a button, tree item or field label. Exact names come first.
-            control_type: Optional element type to narrow the search, e.g. Button, TreeItem, Edit, ListItem.
+            control_type: Optional element type to narrow the UI tree search, e.g. Button, TreeItem, Edit, ListItem.
         """
         return finder.find(name, control_type)
 
     @function_tool
     def click_ui(name: str, control_type: str | None = None, double: bool = False) -> str:
-        """Click the first UI element of the host with this name (exact names before names that only contain it).
+        """Click the host's UI element with this name, as shown on the screen. The text on the screen is read first
+        (OCR): a single exact match is clicked, or a single one that contains the name. Otherwise the UI tree is
+        searched (exact names before names that only contain it).
 
         Args:
-            name: The element's name as shown.
-            control_type: Optional element type, e.g. Button, TreeItem, ListItem; give it when the name occurs twice.
+            name: The element's name exactly as shown.
+            control_type: Optional element type, e.g. Button, TreeItem, ListItem; used when the name occurs twice.
             double: True for a double-click (e.g. to open a tree item).
         """
         return finder.click(name, control_type, double)

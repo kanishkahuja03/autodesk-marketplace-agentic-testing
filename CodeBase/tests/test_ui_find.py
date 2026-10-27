@@ -3,6 +3,7 @@
 import json
 import time
 
+from mpagent.execute.ocr import OcrUnavailable, Word
 from mpagent.execute.ui_find import (
     FALLBACK,
     MAX_IDENTICAL_CALLS,
@@ -217,3 +218,122 @@ def test_host_pids_are_looked_up_once_for_several_calls_and_window_titles(tmp_pa
     assert len(lookups) == 1  # cached for a few seconds
     assert trace_events(tmp_path)[-1]["tool"] == "window_titles"
     assert finder(tmp_path, FakeBackend([]), pids=lambda processes: {}).window_titles() == []
+
+
+# ---- OCR first (OCR_UI_PLAN.md O3-O11)
+
+MAIN = (0, 0, 800, 600)
+DIALOG = (200, 150, 600, 450)
+
+
+def words(*items, y=40):
+    return [Word(text, x, y, x + 6 * len(text), y + 10) for x, text in items]
+
+
+class FakeOcr:
+    """OCR lines per screen rectangle; raises `fail` when set."""
+
+    def __init__(self, screens, fail=None):
+        self.screens, self.fail, self.reads = screens, fail, []
+
+    def read(self, left, top, right, bottom):
+        self.reads.append((left, top, right, bottom))
+        if self.fail:
+            raise self.fail
+        return self.screens.get((left, top, right, bottom), [])
+
+
+class RegionsBackend(FakeBackend):
+    def __init__(self, elements, regions=(("Host main window", True, MAIN),)):
+        super().__init__(elements)
+        self.region_list = list(regions)
+
+    def regions(self, pids, main_window):
+        return self.region_list
+
+
+def ocr_finder(tmp_path, backend, reader):
+    f = UiFinder(["host.exe"], Trace(tmp_path), backend=backend, pids=lambda processes: {4242: "host.exe"},
+                 timeout_s=5, ocr_reader=reader)
+    f.retry_after_s = 0.01
+    return f
+
+
+def test_click_uses_a_single_exact_ocr_match_and_ignores_control_type(tmp_path):
+    reader = FakeOcr({MAIN: [words((10, "Home"), (130, "P&ID"), (158, "Connector"))]})
+    backend = RegionsBackend([])
+    reply = ocr_finder(tmp_path, backend, reader).click("P&ID Connector", control_type="TabItem")
+    assert reply.startswith("Clicked 'P&ID Connector' (OCR, type unknown) in 'Host main window' at (")
+    assert reply.endswith("(found by OCR).") and backend.clicks == [("P&ID Connector", False)]
+    assert backend.searched_pids == []  # no UI Automation search
+    [event] = trace_events(tmp_path)
+    assert event["engine"] == "ocr" and "ocr_seconds" in event and event["ocr_words"] == 3
+
+
+def test_a_single_contains_match_is_clicked_but_several_go_to_ui_automation(tmp_path):
+    one = FakeOcr({MAIN: [words((10, "Open..."))]})
+    assert ocr_finder(tmp_path, RegionsBackend([]), one).click("Open").startswith("Clicked 'Open...' (OCR")
+    several = FakeOcr({MAIN: [words((10, "P&ID"), (38, "exportieren"), (140, "Auswahl"), (186, "exportieren"))]})
+    backend = RegionsBackend([m("P&ID exportieren", "Button")])
+    reply = ocr_finder(tmp_path, backend, several).click("Export", control_type="Button")
+    assert reply.startswith("Clicked 'P&ID exportieren' (Button)") and len(backend.searched_pids) == 1  # no retry
+    event = trace_events(tmp_path)[-1]
+    assert event["engine"] == "uia" and "uia_seconds" in event and "ocr_seconds" in event
+
+
+def test_several_ocr_places_and_nothing_in_the_tree_list_the_places(tmp_path):
+    reader = FakeOcr({MAIN: [words((10, "Layout")), words((10, "Layout"), y=90)]})
+    backend = RegionsBackend([])
+    reply = ocr_finder(tmp_path, backend, reader).click("Layout")
+    assert "OCR read it 2 times on the screen" in reply and "Windows-MCP Click" in reply and backend.clicks == []
+    assert len(backend.searched_pids) == 1  # searched once, without the retry
+
+
+def test_nothing_on_the_screen_falls_back_to_ui_automation_without_the_retry(tmp_path):
+    backend = RegionsBackend([])
+    assert ocr_finder(tmp_path, backend, FakeOcr({})).click("Nothing").endswith(FALLBACK)
+    assert len(backend.searched_pids) == 1
+    backend = RegionsBackend([m("Area_1", "TreeItem")])
+    assert ocr_finder(tmp_path, backend, FakeOcr({})).click("Area_1", double=True).startswith(
+        "Double-clicked 'Area_1' (TreeItem)")
+
+
+def test_dialogs_are_read_before_the_main_window(tmp_path):
+    reader = FakeOcr({DIALOG: [words((300, "OK"), y=400)], MAIN: [words((10, "OK"))]})
+    backend = RegionsBackend([], regions=[("Host main window", True, MAIN), ("Note", False, DIALOG)])
+    reply = ocr_finder(tmp_path, backend, reader).click("OK")
+    assert reply.startswith("Clicked 'OK' (OCR, type unknown) in 'Note'") and reader.reads == [DIALOG]
+
+
+def test_find_lists_ocr_matches_and_type_never_uses_ocr(tmp_path):
+    reader = FakeOcr({MAIN: [words((10, "P&ID"), (38, "exportieren"), (140, "Auswahl"), (186, "exportieren"))]})
+    backend = RegionsBackend([m("File name:", "Edit")])
+    f = ocr_finder(tmp_path, backend, reader)
+    listing = f.find("export")
+    assert listing.startswith("2 match(es) read on the screen by OCR") and "1. 'exportieren' (OCR, type unknown)" in listing
+    assert backend.searched_pids == []
+    reads = len(reader.reads)
+    assert f.type_text("File name:", "x").startswith("Typed into 'File name:' (Edit)") and len(reader.reads) == reads
+    assert ocr_finder(tmp_path, backend, FakeOcr({})).find("File name").startswith("1 match(es), first is used")
+
+
+def test_ocr_without_a_language_is_switched_off_and_ui_automation_works(tmp_path):
+    reader = FakeOcr({}, fail=OcrUnavailable("no OCR language"))
+    backend = RegionsBackend([m("Open")])
+    f = ocr_finder(tmp_path, backend, reader)
+    assert f.click("Open").startswith("Clicked 'Open' (Button)") and trace_events(tmp_path)[-1]["ocr_error"]
+    f.click("Open", double=True)
+    assert len(reader.reads) == 1  # not asked again
+    broken = FakeOcr({}, fail=OSError("capture failed"))
+    assert ocr_finder(tmp_path, RegionsBackend([m("Open")]), broken).click("Open").startswith("Clicked 'Open'")
+
+
+def test_ocr_works_when_the_backend_is_built_on_first_use(tmp_path, monkeypatch):
+    # live check 2026-10-26: the OCR job asked for the backend from inside the worker thread and waited for itself
+    from mpagent.execute import ui_find
+
+    monkeypatch.setattr(ui_find, "UiaBackend", lambda: RegionsBackend([]))
+    reader = FakeOcr({MAIN: [words((10, "Layout"))]})
+    f = UiFinder(["host.exe"], Trace(tmp_path), pids=lambda processes: {4242: "host.exe"}, timeout_s=2,
+                 ocr_reader=reader)
+    assert f.click("Layout").startswith("Clicked 'Layout' (OCR")

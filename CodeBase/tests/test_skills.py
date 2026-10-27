@@ -164,7 +164,7 @@ def test_navigation_steps_are_named_by_the_host_profile():
 
     steps = host_navigation("autocad-plant3d", SKILLS / "hosts", "navigation_steps")
     assert steps and 'click_ui("P&ID Drawings", control_type="TreeItem", double=True)' in steps
-    assert 'type_ui("File name:"' in steps and "Screenshot only" in steps
+    assert 'type_ui("File name:"' in steps and "`click_ui` by the text shown" in steps  # OCR_UI_PLAN.md O4
     revit = host_navigation("revit", SKILLS / "hosts", "navigation_steps")
     assert revit and "wait_for_host(90)" in revit and '"Load Once"' in revit and 'control_type="ListItem"' in revit
     ui = (SKILLS / "execute" / "ui-find.md").read_text(encoding="utf-8")
@@ -178,7 +178,9 @@ def test_name_tools_answer_dialogs_and_skip_screenshot_only_areas():
                    "even when a claim names an element in that area"):
         assert phrase in ui, phrase
     steps = (SKILLS / "hosts" / "navigation" / "plant3d-navigation-steps.md").read_text(encoding="utf-8")
-    assert "## 0. Start-up" in steps and "**without a Snapshot first**" in steps and "**Screenshot only:**" in steps
+    assert "## 0. Start-up" in steps and "**without a Snapshot first**" in steps
+    assert "**Never take a Snapshot of the ribbon**" in steps  # the ribbon is clicked by OCR (OCR_UI_PLAN.md)
+    assert "**Text on the screen first:**" in ui and "**the only exact match**" in ui
 
 
 def test_generic_rules_for_busy_hosts_own_copy_and_open_containers():
